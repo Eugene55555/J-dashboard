@@ -16,6 +16,21 @@ const state = {
   token: 0,
 };
 
+const STORE_KEY = 'jd_state';
+
+function loadPrefs() {
+  try { return JSON.parse(localStorage.getItem(STORE_KEY) || '{}') || {}; } catch (e) { return {}; }
+}
+
+function savePrefs() {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      view: state.view, preset: state.preset, start: state.start, end: state.end,
+      status: state.status, all: state.all, selected: [...state.selected],
+    }));
+  } catch (e) { /* приватный режим — молча пропускаем */ }
+}
+
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
@@ -113,6 +128,7 @@ function setPeriod(preset) {
   }
   $$('#presets button').forEach((b) => b.classList.toggle('active', b.dataset.preset === preset));
   updatePill();
+  savePrefs();
 }
 
 function updatePill() {
@@ -139,6 +155,7 @@ function setView(view) {
   $$('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
   $('#view-title').textContent = TITLES[view][0];
   $('#view-sub').textContent = TITLES[view][1];
+  savePrefs();
   render();
 }
 
@@ -933,17 +950,17 @@ function bindChrome() {
     state.start = $('#date-start').value; state.end = $('#date-end').value;
     if (state.start > state.end) { state.end = state.start; $('#date-end').value = state.end; }
     state.preset = 'custom'; $$('#presets button').forEach((x) => x.classList.toggle('active', x.dataset.preset === 'custom'));
-    updatePill(); render();
+    updatePill(); savePrefs(); render();
   };
   $('#date-end').onchange = () => {
     state.end = $('#date-end').value; state.start = $('#date-start').value;
     if (state.start > state.end) { state.start = state.end; $('#date-start').value = state.start; }
     state.preset = 'custom'; $$('#presets button').forEach((x) => x.classList.toggle('active', x.dataset.preset === 'custom'));
-    updatePill(); render();
+    updatePill(); savePrefs(); render();
   };
 
   const statusFilter = $('#status-filter');
-  statusFilter.onchange = () => { state.status = statusFilter.value; render(); };
+  statusFilter.onchange = () => { state.status = statusFilter.value; savePrefs(); render(); };
 
   const panel = $('#picker-panel');
   $('#picker-btn').onclick = (e) => { e.stopPropagation(); panel.classList.toggle('open'); };
@@ -953,9 +970,10 @@ function bindChrome() {
     state.all = e.target.checked;
     if (state.all) state.selected.clear();
     buildPicker();
+    savePrefs();
   };
-  $('#picker-clear').onclick = () => { state.all = true; state.selected.clear(); buildPicker(); render(); };
-  $('#picker-apply').onclick = () => { panel.classList.remove('open'); render(); };
+  $('#picker-clear').onclick = () => { state.all = true; state.selected.clear(); buildPicker(); savePrefs(); render(); };
+  $('#picker-apply').onclick = () => { panel.classList.remove('open'); savePrefs(); render(); };
   $('#picker-search').oninput = (e) => {
     const q = e.target.value.toLowerCase();
     $$('#picker-list .picker-item').forEach((el) => { el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none'; });
@@ -977,6 +995,16 @@ function bindChrome() {
 
 async function boot() {
   bindChrome();
+  const prefs = loadPrefs();
+  state.view = prefs.view && TITLES[prefs.view] ? prefs.view : 'overview';
+  state.preset = prefs.preset || '7';
+  state.status = prefs.status || '';
+  state.status && ($('#status-filter').value = state.status);
+  state.all = prefs.all !== false;
+  state.selected = new Set(Array.isArray(prefs.selected) ? prefs.selected : []);
+  state.start = prefs.start || null;
+  state.end = prefs.end || null;
+
   const logout = $('#btn-logout');
   if (logout) {
     const canLogout = window.J_STATIC && window.J_STATIC.encrypted;
@@ -988,10 +1016,17 @@ async function boot() {
       };
     }
   }
-  setPeriod('7');
   try {
     await loadMeta();
-    render();
+    if (state.preset === 'custom' && state.start && state.end) {
+      $('#date-start').value = state.start;
+      $('#date-end').value = state.end;
+      $$('#presets button').forEach((x) => x.classList.toggle('active', x.dataset.preset === 'custom'));
+      updatePill();
+    } else {
+      setPeriod(state.preset === 'custom' ? '7' : state.preset);
+    }
+    setView(state.view);
   } catch (err) {
     $('#view').innerHTML = `<div class="card"><div class="card-body"><div class="empty"><b>Нет соединения с базой</b>${esc(err.message)}</div></div></div>`;
   }
