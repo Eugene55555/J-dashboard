@@ -1,0 +1,12 @@
+# Данные и секреты не коммитим.
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store

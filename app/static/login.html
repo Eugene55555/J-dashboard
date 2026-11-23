@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Вход · J-dashboard</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<div class="login-wrap">
+  <form class="login-card" id="form">
+    <div class="brand">
+      <div class="brand-mark">J</div>
+      <div>
+        <div class="brand-name">J-dashboard</div>
+        <div class="brand-sub">Amazon Ads · приватный доступ</div>
+      </div>
+    </div>
+    <label for="password">Пароль</label>
+    <input id="password" type="password" autocomplete="current-password" autofocus>
+    <button class="btn primary" type="submit">Войти</button>
+    <div class="login-err" id="err"></div>
+  </form>
+</div>
+<script>
+document.getElementById('form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = document.getElementById('err');
+  err.textContent = '';
+  const res = await fetch('/api/login', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ password: document.getElementById('password').value }),
+  });
+  if (res.ok) location.href = '/';
+  else { const data = await res.json().catch(() => ({})); err.textContent = data.detail || 'Ошибка входа'; }
+});
+</script>
+</body>
+</html>
