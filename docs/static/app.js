@@ -636,7 +636,7 @@ views.products = async () => {
       <div class="card-head"><div><div class="card-title">ASIN</div><div class="card-sub">товары, которые рекламировались</div></div></div>
       ${tableHtml('products', [
         { key: 'asin', label: 'ASIN', left: true, render: (r) => `<span class="mono" style="color:#cfe3ff">${esc(r.asin)}</span>` },
-        { key: 'campaign_id', label: 'Кампания', left: true, render: (r) => `<span style="color:var(--muted)">${esc(r.campaign_id)}</span>` },
+        { key: 'campaign_name', label: 'Кампания', left: true, render: (r) => `<span style="color:var(--muted);display:inline-block;max-width:230px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom" title="${esc(r.campaign_id)}">${esc(r.campaign_name || r.campaign_id)}</span>` },
         { key: 'impressions', label: 'Показы', render: (r) => fmtInt(r.impressions) },
         { key: 'clicks', label: 'Клики', render: (r) => fmtInt(r.clicks) },
         { key: 'ctr', label: 'CTR', render: (r) => fmtPct(r.ctr) },

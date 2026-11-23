@@ -369,8 +369,10 @@ window.LocalAPI = (() => {
     });
     return [...grouped.entries()].map(([, list]) => {
       const first = list[0];
+      const meta = campaignMap().get(first[1]) || {};
       return ratios({
-        campaign_id: first[1], ad_group_id: first[2], ad_id: first[3], asin: first[4], marketplace: first[5],
+        campaign_id: first[1], campaign_name: meta.name || first[1],
+        ad_group_id: first[2], ad_id: first[3], asin: first[4], marketplace: first[5],
         ...sum(list, (r) => ({ impressions: r[6], clicks: r[7], spend: r[8], orders: r[9], sales: r[10], units: r[11] })),
       });
     }).sort((a, b) => b.spend - a.spend);

@@ -243,11 +243,13 @@ def products(conn: sqlite3.Connection, start: str, end: str,
              campaigns_filter: list[str] | None) -> list[dict[str, Any]]:
     where, params = _camp_filter(campaigns_filter)
     rows = conn.execute(
-        f"""SELECT asin, marketplace, campaign_id, ad_id,
-                   SUM(impressions) impressions, SUM(clicks) clicks, SUM(spend) spend,
-                   SUM(orders) orders, SUM(sales) sales, SUM(units) units
-            FROM fact_product_day WHERE date BETWEEN ? AND ? {where}
-            GROUP BY asin, marketplace, campaign_id ORDER BY spend DESC""",
+        f"""SELECT f.asin, f.marketplace, f.campaign_id, COALESCE(c.name, '') campaign_name,
+                   SUM(f.impressions) impressions, SUM(f.clicks) clicks,
+                   SUM(f.spend) spend, SUM(f.orders) orders, SUM(f.sales) sales, SUM(f.units) units
+            FROM fact_product_day f LEFT JOIN dim_campaign c ON c.campaign_id = f.campaign_id
+            WHERE f.date BETWEEN ? AND ? {where.replace('campaign_id', 'f.campaign_id')}
+            GROUP BY f.asin, f.marketplace, f.campaign_id, c.name
+            ORDER BY spend DESC""",
         [start, end, *params],
     ).fetchall()
     return [with_ratios(dict(r)) for r in rows]
