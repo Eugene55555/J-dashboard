@@ -977,6 +977,17 @@ function bindChrome() {
 
 async function boot() {
   bindChrome();
+  const logout = $('#btn-logout');
+  if (logout) {
+    const canLogout = window.J_STATIC && window.J_STATIC.encrypted;
+    if (canLogout) {
+      logout.classList.remove('hidden');
+      logout.onclick = () => {
+        sessionStorage.removeItem('jd_password');
+        location.reload();
+      };
+    }
+  }
   setPeriod('7');
   try {
     await loadMeta();

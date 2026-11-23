@@ -379,3 +379,10 @@ tbody tr:last-child td { border-bottom: 0; }
 .gate-card .btn { width: 100%; justify-content: center; margin-top: 16px; }
 .gate-err { color: #ffb1b1; font-size: 12px; margin-top: 10px; min-height: 16px; }
 .gate-hint { color: var(--dim); font-size: 11.5px; margin-top: 12px; line-height: 1.45; }
+
+.logout {
+  margin-top: 12px; width: 100%; display: inline-flex; align-items: center; gap: 7px;
+  background: transparent; border: 1px solid var(--line); border-radius: 8px;
+  color: var(--muted); font-size: 12px; padding: 6px 9px; cursor: pointer;
+}
+.logout:hover { color: #ffd48a; border-color: #4a3a22; background: rgba(255, 153, 0, .06); }
