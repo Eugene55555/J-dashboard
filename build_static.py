@@ -107,14 +107,18 @@ def build(account_id: str, out_dir: Path, password: str = "", login: str = "euge
         FROM fact_product_day ORDER BY date""")]
 
     changes = rows(conn, """
-        SELECT change_date, change_ts, date_precision, entity_type, entity_id, campaign_id,
-               ad_group_id, entity_label, field, old_value, new_value, delta, source, actor, summary
-        FROM changes ORDER BY change_ts DESC, change_date DESC LIMIT 5000""")
+        SELECT ch.change_date, ch.change_ts, ch.date_precision, ch.entity_type, ch.entity_id,
+               ch.campaign_id, ch.ad_group_id,
+               COALESCE(NULLIF(ch.entity_label, ''), c.name, ch.entity_id) AS entity_label,
+               ch.field, ch.old_value, ch.new_value, ch.delta, ch.source, ch.actor, ch.summary
+        FROM changes ch LEFT JOIN dim_campaign c ON c.campaign_id = ch.campaign_id
+        ORDER BY ch.change_ts DESC, ch.change_date DESC LIMIT 5000""")
     coverage = rows(conn, "SELECT dataset, date, rows, spend, status FROM coverage ORDER BY date DESC")
     runs = rows(conn, """SELECT run_id, started_at, finished_at, status, files, rows, source
                          FROM sync_runs ORDER BY started_at DESC LIMIT 20""")
 
     span = conn.execute("SELECT MIN(date), MAX(date) FROM fact_campaign_day").fetchone()
+    changes_min = conn.execute("SELECT MIN(change_date) FROM changes").fetchone()[0]
     counts = {
         table: conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0]
         for table in ("fact_campaign_day", "fact_target_day", "fact_searchterm_day",
@@ -136,6 +140,7 @@ def build(account_id: str, out_dir: Path, password: str = "", login: str = "euge
             },
             "date_min": span[0],
             "date_max": span[1],
+            "changes_min": changes_min,
             "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "counts": counts,
             "targets": positives,

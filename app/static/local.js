@@ -356,6 +356,7 @@ window.LocalAPI = (() => {
       })),
       date_min: DATA.meta.date_min,
       date_max: DATA.meta.date_max,
+      changes_min: DATA.meta.changes_min || null,
       last_run: DATA.runs[0] || null,
       counts: DATA.meta.counts,
       targets: DATA.meta.targets,

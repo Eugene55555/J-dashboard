@@ -536,20 +536,21 @@ def import_changes(conn: sqlite3.Connection, rows: Iterable[dict[str, Any]]) -> 
             ts_ms = row.get("timestamp")
             ts = datetime.fromtimestamp(float(ts_ms) / 1000, tz=timezone.utc) if ts_ms else datetime.now(timezone.utc)
             meta = row.get("metadata") or {}
-            campaign_id = _text(meta.get("campaignId"))
+            entity_type = _text(row.get("entityType"))
+            entity_id = _text(row.get("entityId"))
+            campaign_id = _text(meta.get("campaignId")) or (entity_id if entity_type == "CAMPAIGN" else "")
             ad_group_id = _text(meta.get("adGroupId"))
             field = _text(row.get("changeType"))
             if field == "PLACEMENT_GROUP" and meta.get("placementGroupPosition"):
                 field = f"PLACEMENT_{meta['placementGroupPosition']}"
             old, new = _text(row.get("previousValue")), _text(row.get("newValue"))
-            entity_id = _text(row.get("entityId"))
             _add_change(
                 conn,
                 change_id=_sha("history", entity_id, field, old, new, ts.isoformat()),
                 change_date=ts.date().isoformat(),
                 change_ts=ts.isoformat(),
                 precision="EXACT_TS",
-                entity_type=_text(row.get("entityType")),
+                entity_type=entity_type,
                 entity_id=entity_id,
                 campaign_id=campaign_id,
                 ad_group_id=ad_group_id,

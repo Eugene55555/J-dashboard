@@ -218,11 +218,14 @@ def changes(conn: sqlite3.Connection, start: str, end: str,
         where += " AND (summary LIKE ? OR field LIKE ? OR entity_label LIKE ?)"
         params += [f"%{search}%", f"%{search}%", f"%{search}%"]
     rows = conn.execute(
-        f"""SELECT change_id, change_date, change_ts, date_precision, entity_type, entity_id,
-                   campaign_id, ad_group_id, entity_label, field, old_value, new_value, delta,
-                   source, actor, summary
-            FROM changes WHERE change_date BETWEEN ? AND ? {where}
-            ORDER BY change_ts DESC, change_date DESC LIMIT {int(limit)}""",
+        f"""SELECT ch.change_id, ch.change_date, ch.change_ts, ch.date_precision, ch.entity_type,
+                   ch.entity_id, ch.campaign_id, ch.ad_group_id,
+                   COALESCE(NULLIF(ch.entity_label, ''), c.name, ch.entity_id) AS entity_label,
+                   ch.field, ch.old_value, ch.new_value, ch.delta,
+                   ch.source, ch.actor, ch.summary
+            FROM changes ch LEFT JOIN dim_campaign c ON c.campaign_id = ch.campaign_id
+            WHERE ch.change_date BETWEEN ? AND ? {where.replace('campaign_id', 'ch.campaign_id')}
+            ORDER BY ch.change_ts DESC, ch.change_date DESC LIMIT {int(limit)}""",
         [start, end, *params],
     ).fetchall()
     return [dict(r) for r in rows]
@@ -241,8 +244,10 @@ def meta(conn: sqlite3.Connection) -> dict[str, Any]:
         for table in ("fact_campaign_day", "fact_target_day", "fact_searchterm_day",
                       "fact_placement_day", "fact_product_day", "changes")
     }
+    changes_span = conn.execute("SELECT MIN(change_date) FROM changes").fetchone()
     return {
         "campaigns": [dict(r) for r in campaigns_list],
+        "changes_min": changes_span[0],
         "date_min": span[0],
         "date_max": span[1],
         "last_run": dict(last_run) if last_run else None,

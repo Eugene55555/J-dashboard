@@ -652,6 +652,7 @@ views.products = async () => {
 
 views.changes = async () => {
   const p = query();
+  if (state.preset === 'all' && state.meta && state.meta.changes_min) p.set('start', state.meta.changes_min);
   if (state.changeSearch) p.set('q', state.changeSearch);
   const rows = await api('/api/changes?' + p);
   const srcLabel = {
@@ -689,7 +690,8 @@ views.changes = async () => {
       <div class="card-body">
         ${rows.length ? html : `<div class="empty"><b>За выбранный период изменений нет</b>
           Журнал пополняется при каждой синхронизации: история Amazon (90 дней) и сравнение снимков настроек.<br>
-          Если период попадает на дни до первого запуска — записей за них не будет.</div>`}
+          ${state.preset === 'all' ? '' : 'Возможно, события есть за более широкий период.'}
+          ${state.preset === 'all' ? 'Если период шире истории Amazon — записей за старые дни не будет.' : '<div style="margin-top:12px"><button class="btn" id="chg-all">Показать за все время</button></div>'}</div>`}
       </div>
     </div>
     <div class="card"><div class="card-body"><div class="card-sub">
@@ -852,6 +854,8 @@ function afterRender() {
   }
 
   if (state.view === 'changes') {
+    const all = $('#chg-all');
+    if (all) all.onclick = () => { setPeriod('all'); render(); };
     const input = $('#chg-search');
     let timer;
     input.oninput = () => {

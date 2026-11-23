@@ -38,7 +38,7 @@ def request(method: str, path: str, payload=None, media="application/json", trie
         "Amazon-Advertising-API-ClientId": CLIENT_ID,
         "Amazon-Advertising-API-Scope": PROFILE,
         "Accept": media,
-        "Content-Type": "application/json",
+        "Content-Type": media if media != "application/json" else "application/json",
     }
     body = json.dumps(payload).encode() if payload is not None else None
     for attempt in range(tries):
