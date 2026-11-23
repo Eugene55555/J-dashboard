@@ -97,6 +97,12 @@ function setPeriod(preset) {
   const today = state.today || todayISO();
   if (preset === 'month') { state.start = monthStart(today); state.end = today; }
   else if (preset === 'prev_month') { [state.start, state.end] = prevMonthRange(today); }
+  else if (preset === 'all') {
+    // Весь загруженный период: от первого дня в базе до последнего.
+    const meta = state.meta || {};
+    state.start = meta.date_min || isoAdd(today, -365);
+    state.end = meta.date_max || today;
+  }
   else if (preset === 'custom') { /* даты из полей */ }
   else { state.end = today; state.start = isoAdd(today, -(Number(preset) - 1)); }
   if (preset !== 'custom') {
