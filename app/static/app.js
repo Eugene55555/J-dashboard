@@ -27,6 +27,9 @@ function savePrefs() {
     localStorage.setItem(STORE_KEY, JSON.stringify({
       view: state.view, preset: state.preset, start: state.start, end: state.end,
       status: state.status, all: state.all, selected: [...state.selected],
+      targetKind: state.targetKind || 'positive', targetSearch: state.targetSearch || '',
+      termSearch: state.termSearch || '', termOrders: !!state.termOrders,
+      changeSearch: state.changeSearch || '', chart: state.chart || 'money',
     }));
   } catch (e) { /* приватный режим — молча пропускаем */ }
 }
@@ -149,12 +152,16 @@ const TITLES = {
   data: ['Данные', 'Покрытие, запуски и загрузка отчётов'],
 };
 
-function setView(view) {
-  state.view = view;
+function paintChrome(view) {
   $('.filters').classList.toggle('hidden', view === 'data');
   $$('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
   $('#view-title').textContent = TITLES[view][0];
   $('#view-sub').textContent = TITLES[view][1];
+}
+
+function setView(view) {
+  state.view = view;
+  paintChrome(view);
   savePrefs();
   render();
 }
@@ -826,6 +833,7 @@ function afterRender() {
       b.onclick = () => {
         state.chart = b.dataset.mode;
         $$('#chart-modes button').forEach((x) => x.classList.toggle('active', x === b));
+        savePrefs();
         render();
       };
     });
@@ -849,13 +857,13 @@ function afterRender() {
 
   if (state.view === 'targets') {
     $$('#target-kind button').forEach((b) => {
-      b.onclick = () => { state.targetKind = b.dataset.kind; render(); };
+      b.onclick = () => { state.targetKind = b.dataset.kind; savePrefs(); render(); };
     });
     const input = $('#tgt-search');
     let timer;
     input.oninput = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => { state.targetSearch = input.value.trim(); render(); }, 350);
+      timer = setTimeout(() => { state.targetSearch = input.value.trim(); savePrefs(); render(); }, 350);
     };
     bindSorts($('#view'), render);
   }
@@ -865,9 +873,9 @@ function afterRender() {
     let timer;
     input.oninput = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => { state.termSearch = input.value.trim(); render(); }, 350);
+      timer = setTimeout(() => { state.termSearch = input.value.trim(); savePrefs(); render(); }, 350);
     };
-    $('#term-orders').onchange = (e) => { state.termOrders = e.target.checked; render(); };
+    $('#term-orders').onchange = (e) => { state.termOrders = e.target.checked; savePrefs(); render(); };
     bindSorts($('#view'), render);
   }
 
@@ -878,7 +886,7 @@ function afterRender() {
     let timer;
     input.oninput = () => {
       clearTimeout(timer);
-      timer = setTimeout(() => { state.changeSearch = input.value.trim(); render(); }, 350);
+      timer = setTimeout(() => { state.changeSearch = input.value.trim(); savePrefs(); render(); }, 350);
     };
   }
 
@@ -1004,6 +1012,13 @@ async function boot() {
   state.selected = new Set(Array.isArray(prefs.selected) ? prefs.selected : []);
   state.start = prefs.start || null;
   state.end = prefs.end || null;
+  state.targetKind = prefs.targetKind || 'positive';
+  state.targetSearch = prefs.targetSearch || '';
+  state.termSearch = prefs.termSearch || '';
+  state.termOrders = !!prefs.termOrders;
+  state.changeSearch = prefs.changeSearch || '';
+  state.chart = prefs.chart || 'money';
+  paintChrome(state.view);
 
   const logout = $('#btn-logout');
   if (logout) {
