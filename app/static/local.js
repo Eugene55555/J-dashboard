@@ -300,6 +300,28 @@ window.LocalAPI = (() => {
     }).filter((r) => !ordersOnly || r.orders > 0).sort((a, b) => b.spend - a.spend).slice(0, 500);
   }
 
+  const PLACEMENT_LABELS = {
+    'TOP OF SEARCH ON-AMAZON': 'Top of Search',
+    'TOP OF SEARCH OFF-AMAZON': 'Top of Search',
+    'REST OF SEARCH ON-AMAZON': 'Rest of Search',
+    'REST OF SEARCH OFF-AMAZON': 'Rest of Search',
+    'DETAIL PAGE ON-AMAZON': 'Product page',
+    'DETAIL PAGE OFF-AMAZON': 'Product page',
+    'PRODUCT_PAGES': 'Product page',
+    'OTHER ON-AMAZON': 'Rest of Search',
+    'OTHER OFF-AMAZON': 'Rest of Search',
+    'TOP_OF_SEARCH': 'Top of Search',
+    'REST_OF_SEARCH': 'Rest of Search',
+  };
+
+  function placementLabel(raw) {
+    const value = (raw || '').trim();
+    if (!value || value === '__UNKNOWN__') return 'Не определено';
+    return PLACEMENT_LABELS[value.toUpperCase()] ||
+      value.replace(' ON-AMAZON', '').replace(' OFF-AMAZON', '')
+        .toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
+  }
+
   function placementsView(params) {
     const { start, end } = windowOf(params, 30);
     const picked = campaignsParam(params);
@@ -310,12 +332,27 @@ window.LocalAPI = (() => {
       if (!grouped.has(key)) grouped.set(key, []);
       grouped.get(key).push(r);
     });
-    return [...grouped.entries()].map(([, list]) => {
+    // On-Amazon и Off-Amazon одного размещения сливаем в одну строку.
+    const merged = new Map();
+    [...grouped.values()].forEach((list) => {
       const first = list[0];
-      const meta = campaignMap().get(first[1]) || {};
+      const label = placementLabel(first[2]);
+      const key = first[1] + '|' + label;
+      if (!merged.has(key)) {
+        merged.set(key, { campaign_id: first[1], placement: label, raws: new Set(), list: [] });
+      }
+      const slot = merged.get(key);
+      slot.raws.add(first[2]);
+      slot.list.push(...list);
+    });
+    return [...merged.values()].map((slot) => {
+      const meta = campaignMap().get(slot.campaign_id) || {};
       return ratios({
-        placement: first[2], campaign_id: first[1], campaign_name: meta.name || first[1],
-        ...sum(list, (r) => ({ impressions: r[3], clicks: r[4], spend: r[5], orders: r[6], sales: r[7], units: r[8] })),
+        placement: slot.placement,
+        placement_raws: [...slot.raws].join(', '),
+        campaign_id: slot.campaign_id,
+        campaign_name: meta.name || slot.campaign_id,
+        ...sum(slot.list, (r) => ({ impressions: r[3], clicks: r[4], spend: r[5], orders: r[6], sales: r[7], units: r[8] })),
       });
     }).sort((a, b) => b.spend - a.spend);
   }

@@ -615,7 +615,7 @@ views.placements = async () => {
       <div class="card-head"><div><div class="card-title">По кампаниям и размещениям</div></div></div>
       ${tableHtml('placements', [
         { key: 'campaign_name', label: 'Кампания', left: true, render: (r) => nameCell(r.campaign_name || r.campaign_id, '', r.campaign_id) },
-        { key: 'placement', label: 'Размещение', left: true, render: (r) => `<span class="tag">${esc(r.placement)}</span>` },
+        { key: 'placement', label: 'Размещение', left: true, render: (r) => `<span class="tag" title="${esc(r.placement_raws || r.placement)}">${esc(r.placement)}</span>` },
         { key: 'impressions', label: 'Показы', render: (r) => fmtInt(r.impressions) },
         { key: 'clicks', label: 'Клики', render: (r) => fmtInt(r.clicks) },
         { key: 'ctr', label: 'CTR', render: (r) => fmtPct(r.ctr) },

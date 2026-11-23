@@ -7,6 +7,29 @@ from typing import Any
 
 METRICS = ("impressions", "clicks", "spend", "orders", "sales", "units")
 
+# Как эти размещения называются в кабинете Amazon Ads.
+PLACEMENT_LABELS = {
+    "TOP OF SEARCH ON-AMAZON": "Top of Search",
+    "TOP OF SEARCH OFF-AMAZON": "Top of Search",
+    "REST OF SEARCH ON-AMAZON": "Rest of Search",
+    "REST OF SEARCH OFF-AMAZON": "Rest of Search",
+    "DETAIL PAGE ON-AMAZON": "Product page",
+    "DETAIL PAGE OFF-AMAZON": "Product page",
+    "PRODUCT_PAGES": "Product page",
+    "PRODUCT PAGE": "Product page",
+    "OTHER ON-AMAZON": "Rest of Search",
+    "OTHER OFF-AMAZON": "Rest of Search",
+    "TOP_OF_SEARCH": "Top of Search",
+    "REST_OF_SEARCH": "Rest of Search",
+}
+
+
+def placement_label(raw: str | None) -> str:
+    value = (raw or "").strip()
+    if not value or value == "__UNKNOWN__":
+        return "Не определено"
+    return PLACEMENT_LABELS.get(value.upper(), value.replace(" ON-AMAZON", "").replace(" OFF-AMAZON", "").title())
+
 
 def _camp_filter(campaigns: list[str] | None, column: str = "campaign_id") -> tuple[str, list[str]]:
     if not campaigns:
@@ -196,7 +219,24 @@ def placements(conn: sqlite3.Connection, start: str, end: str,
             GROUP BY p.placement, p.campaign_id ORDER BY spend DESC""",
         [start, end, *params],
     ).fetchall()
-    return [with_ratios(dict(r)) for r in rows]
+
+    # On-Amazon и Off-Amazon одного размещения — одна строка в кабинете.
+    merged: dict[tuple[str, str], dict] = {}
+    for raw in rows:
+        row = dict(raw)
+        raw_value = row.pop("placement") or "Не определено"
+        label = placement_label(raw_value)
+        key = (row["campaign_id"], label)
+        slot = merged.setdefault(key, {**row, "placement": label, "placement_raws": set()})
+        slot["placement_raws"].add(raw_value)
+        for metric in METRICS:
+            slot[metric] = (slot.get(metric) or 0) + (row.get(metric) or 0)
+    output = []
+    for slot in merged.values():
+        slot["placement_raws"] = ", ".join(sorted(slot["placement_raws"]))
+        output.append(with_ratios(slot))
+    output.sort(key=lambda r: r["spend"], reverse=True)
+    return output
 
 
 def products(conn: sqlite3.Connection, start: str, end: str,
