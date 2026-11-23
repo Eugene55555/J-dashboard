@@ -8,6 +8,7 @@ const state = {
   start: null,
   end: null,
   all: true,
+  status: '',
   selected: new Set(),
   meta: null,
   sort: {},
@@ -88,6 +89,7 @@ function query() {
   if (state.start) p.set('start', state.start);
   if (state.end) p.set('end', state.end);
   if (!state.all && state.selected.size) p.set('campaigns', [...state.selected].join(','));
+  if (state.status) p.set('status', state.status);
   return p;
 }
 
@@ -939,6 +941,9 @@ function bindChrome() {
     state.preset = 'custom'; $$('#presets button').forEach((x) => x.classList.toggle('active', x.dataset.preset === 'custom'));
     updatePill(); render();
   };
+
+  const statusFilter = $('#status-filter');
+  statusFilter.onchange = () => { state.status = statusFilter.value; render(); };
 
   const panel = $('#picker-panel');
   $('#picker-btn').onclick = (e) => { e.stopPropagation(); panel.classList.toggle('open'); };

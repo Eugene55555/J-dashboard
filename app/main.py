@@ -154,59 +154,82 @@ def _campaigns(raw: str | None) -> list[str] | None:
     return items or None
 
 
+def _scope(conn, status: str | None, campaigns: list[str] | None) -> list[str] | None:
+    """Сузить выборку до кампаний с нужным статусом.
+
+    Статус — атрибут кампании, а не факта, поэтому сначала находим её ID,
+    затем пересекаем с выбранными вручную. Пустой результат даёт заведомо
+    несуществующий ID, чтобы запрос вернул пустоту, а не все кампании.
+    """
+    if not status:
+        return campaigns
+    allowed = {r[0] for r in conn.execute(
+        "SELECT campaign_id FROM dim_campaign WHERE state = ?", (status,))}
+    if campaigns:
+        allowed &= set(campaigns)
+    return sorted(allowed) or ["__none__"]
+
+
 @app.get("/api/overview")
 def api_overview(start: str | None = None, end: str | None = None,
                  campaigns: str | None = None, grain: str = "day",
+                 status: str | None = None,
                  conn=Depends(db), _=Depends(require_auth)):
     s, e = _window(start, end)
-    return queries.overview(conn, s, e, _campaigns(campaigns), grain)
+    return queries.overview(conn, s, e, _scope(conn, status, _campaigns(campaigns)), grain)
 
 
 @app.get("/api/campaigns")
 def api_campaigns(start: str | None = None, end: str | None = None,
-                  campaigns: str | None = None, conn=Depends(db), _=Depends(require_auth)):
+                  campaigns: str | None = None, status: str | None = None,
+                  conn=Depends(db), _=Depends(require_auth)):
     s, e = _window(start, end)
-    return queries.campaigns(conn, s, e, _campaigns(campaigns))
+    return queries.campaigns(conn, s, e, _scope(conn, status, _campaigns(campaigns)))
 
 
 @app.get("/api/targets")
 def api_targets(start: str | None = None, end: str | None = None,
                 campaigns: str | None = None, kind: str = "positive",
-                q: str | None = None, conn=Depends(db), _=Depends(require_auth)):
+                q: str | None = None, status: str | None = None,
+                conn=Depends(db), _=Depends(require_auth)):
     s, e = _window(start, end, 30)
-    return queries.targets(conn, s, e, _campaigns(campaigns), kind, q)
+    return queries.targets(conn, s, e, _scope(conn, status, _campaigns(campaigns)), kind, q)
 
 
 @app.get("/api/terms")
 def api_terms(start: str | None = None, end: str | None = None,
               campaigns: str | None = None, q: str | None = None,
-              orders_only: bool = False, conn=Depends(db), _=Depends(require_auth)):
+              orders_only: bool = False, status: str | None = None,
+              conn=Depends(db), _=Depends(require_auth)):
     s, e = _window(start, end, 30)
-    return queries.search_terms(conn, s, e, _campaigns(campaigns), q, orders_only)
+    return queries.search_terms(conn, s, e, _scope(conn, status, _campaigns(campaigns)), q, orders_only)
 
 
 @app.get("/api/placements")
 def api_placements(start: str | None = None, end: str | None = None,
-                   campaigns: str | None = None, conn=Depends(db), _=Depends(require_auth)):
+                   campaigns: str | None = None, status: str | None = None,
+                   conn=Depends(db), _=Depends(require_auth)):
     s, e = _window(start, end, 30)
-    return queries.placements(conn, s, e, _campaigns(campaigns))
+    return queries.placements(conn, s, e, _scope(conn, status, _campaigns(campaigns)))
 
 
 @app.get("/api/products")
 def api_products(start: str | None = None, end: str | None = None,
-                 campaigns: str | None = None, conn=Depends(db), _=Depends(require_auth)):
+                 campaigns: str | None = None, status: str | None = None,
+                 conn=Depends(db), _=Depends(require_auth)):
     s, e = _window(start, end, 30)
-    return queries.products(conn, s, e, _campaigns(campaigns))
+    return queries.products(conn, s, e, _scope(conn, status, _campaigns(campaigns)))
 
 
 @app.get("/api/changes")
 def api_changes(start: str | None = None, end: str | None = None,
                 campaigns: str | None = None, q: str | None = None,
+                status: str | None = None,
                 conn=Depends(db), _=Depends(require_auth)):
     today = date.today()
     s = start or (today - timedelta(days=90)).isoformat()
     e = end or today.isoformat()
-    return queries.changes(conn, s, e, _campaigns(campaigns), q)
+    return queries.changes(conn, s, e, _scope(conn, status, _campaigns(campaigns)), q)
 
 
 @app.get("/api/coverage")

@@ -143,9 +143,15 @@ window.LocalAPI = (() => {
 
   function inWindow(date, start, end) { return date >= start && date <= end; }
 
-  function campaignsParam(params) {
+  function pickedCampaigns(params) {
     const raw = params.get('campaigns');
-    return raw ? new Set(raw.split(',').map((s) => s.trim()).filter(Boolean)) : null;
+    const base = raw ? new Set(raw.split(',').map((s) => s.trim()).filter(Boolean)) : null;
+    const status = params.get('status');
+    if (!status) return base;
+    const allowed = new Set(DATA.campaigns.filter((c) => c.state === status).map((c) => c.campaign_id));
+    if (!base) return allowed.size ? allowed : new Set(['__none__']);
+    const picked = new Set([...base].filter((id) => allowed.has(id)));
+    return picked.size ? picked : new Set(['__none__']);
   }
 
   function windowOf(params, fallbackDays = 7) {
@@ -160,7 +166,7 @@ window.LocalAPI = (() => {
 
   function overview(params) {
     const { start, end } = windowOf(params);
-    const picked = campaignsParam(params);
+    const picked = pickedCampaigns(params);
     const grain = params.get('grain') || 'day';
     const rows = DATA.facts.campaign_day.filter((r) =>
       inWindow(r[0], start, end) && (!picked || picked.has(r[1])));
@@ -227,7 +233,7 @@ window.LocalAPI = (() => {
 
   function campaignsView(params) {
     const { start, end } = windowOf(params);
-    const picked = campaignsParam(params);
+    const picked = pickedCampaigns(params);
     const totals = new Map();
     DATA.facts.campaign_day.forEach((r) => {
       if (!inWindow(r[0], start, end) || (picked && !picked.has(r[1]))) return;
@@ -242,7 +248,7 @@ window.LocalAPI = (() => {
 
   function targetsView(params) {
     const { start, end } = windowOf(params, 30);
-    const picked = campaignsParam(params);
+    const picked = pickedCampaigns(params);
     const kind = params.get('kind') || 'positive';
     const q = (params.get('q') || '').toLowerCase();
     const groups = adGroupMap();
@@ -277,7 +283,7 @@ window.LocalAPI = (() => {
 
   function termsView(params) {
     const { start, end } = windowOf(params, 30);
-    const picked = campaignsParam(params);
+    const picked = pickedCampaigns(params);
     const q = (params.get('q') || '').toLowerCase();
     const ordersOnly = params.get('orders_only') === 'true';
     const grouped = new Map();
@@ -324,7 +330,7 @@ window.LocalAPI = (() => {
 
   function placementsView(params) {
     const { start, end } = windowOf(params, 30);
-    const picked = campaignsParam(params);
+    const picked = pickedCampaigns(params);
     const grouped = new Map();
     DATA.facts.placement_day.forEach((r) => {
       if (!inWindow(r[0], start, end) || (picked && !picked.has(r[1]))) return;
@@ -359,7 +365,7 @@ window.LocalAPI = (() => {
 
   function productsView(params) {
     const { start, end } = windowOf(params, 30);
-    const picked = campaignsParam(params);
+    const picked = pickedCampaigns(params);
     const grouped = new Map();
     DATA.facts.product_day.forEach((r) => {
       if (!inWindow(r[0], start, end) || (picked && !picked.has(r[1]))) return;
@@ -380,7 +386,7 @@ window.LocalAPI = (() => {
 
   function changesView(params) {
     const { start, end } = windowOf(params, 90);
-    const picked = campaignsParam(params);
+    const picked = pickedCampaigns(params);
     const q = (params.get('q') || '').toLowerCase();
     return DATA.changes
       .filter((c) => inWindow(c.change_date, start, end))
