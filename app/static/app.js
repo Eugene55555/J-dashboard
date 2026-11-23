@@ -573,9 +573,9 @@ views.terms = async () => {
         <span class="pill">${rows.length} терминов</span>
       </div>
       <div id="term-table">${tableHtml('terms', [
-        { key: 'search_term', label: 'Поисковый термин', left: true, render: (r) => `<div style="max-width:330px;overflow:hidden;text-overflow:ellipsis">${esc(r.search_term || '—')}</div>` },
-        { key: 'match_type', label: 'Совпадение', left: true, render: (r) => `<span class="tag">${esc(r.match_type || '—')}</span>` },
-        { key: 'targeting', label: 'Таргет', left: true, render: (r) => `<span class="mono" style="max-width:220px;display:inline-block;overflow:hidden;text-overflow:ellipsis">${esc(r.targeting || '—')}</span>` },
+        { key: 'search_term', label: 'Поисковый термин', left: true, render: (r) => `<div style="max-width:300px"><div style="overflow:hidden;text-overflow:ellipsis">${esc(r.search_term || '—')}</div><span class="tag">${esc(r.match_type || '—')}</span></div>` },
+        { key: 'campaign_name', label: 'Кампания', left: true, render: (r) => `<span style="color:var(--muted);display:inline-block;max-width:190px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom" title="${esc(r.campaign_name || r.campaign_id)}">${esc(r.campaign_name || r.campaign_id)}</span>` },
+        { key: 'targeting', label: 'Таргет', left: true, render: (r) => `<span class="mono" style="max-width:160px;display:inline-block;overflow:hidden;text-overflow:ellipsis" title="${esc(r.targeting || '')}">${esc(r.targeting || '—')}</span>` },
         { key: 'impressions', label: 'Показы', render: (r) => fmtInt(r.impressions) },
         { key: 'clicks', label: 'Клики', render: (r) => fmtInt(r.clicks) },
         { key: 'ctr', label: 'CTR', render: (r) => fmtPct(r.ctr) },
@@ -583,7 +583,6 @@ views.terms = async () => {
         { key: 'orders', label: 'Заказы', render: (r) => fmtInt(r.orders) },
         { key: 'sales', label: 'Продажи', render: (r) => '$' + fmtMoney(r.sales) },
         { key: 'acos', label: 'ACOS', render: acosCell },
-        { key: 'cvr', label: 'CVR', render: (r) => fmtPct(r.cvr, 1) },
       ], rows, { defaultSort: 'spend' })}</div>
     </div>`;
 };

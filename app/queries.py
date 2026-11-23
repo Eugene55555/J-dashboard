@@ -170,11 +170,14 @@ def search_terms(conn: sqlite3.Connection, start: str, end: str,
         params.append(f"%{search}%")
     having = " HAVING SUM(orders) > 0" if only_orders else ""
     rows = conn.execute(
-        f"""SELECT search_term, campaign_id, ad_group_id, target_id, targeting, match_type,
-                   SUM(impressions) impressions, SUM(clicks) clicks, SUM(spend) spend,
-                   SUM(orders) orders, SUM(sales) sales, SUM(units) units
-            FROM fact_searchterm_day WHERE date BETWEEN ? AND ? {where}
-            GROUP BY search_term, campaign_id {having}
+        f"""SELECT s.search_term, s.campaign_id, COALESCE(c.name, '') campaign_name,
+                   s.ad_group_id, s.target_id, s.targeting, s.match_type,
+                   SUM(s.impressions) impressions, SUM(s.clicks) clicks, SUM(s.spend) spend,
+                   SUM(s.orders) orders, SUM(s.sales) sales, SUM(s.units) units
+            FROM fact_searchterm_day s
+            LEFT JOIN dim_campaign c ON c.campaign_id = s.campaign_id
+            WHERE s.date BETWEEN ? AND ? {where.replace('campaign_id', 's.campaign_id')}
+            GROUP BY s.search_term, s.campaign_id, c.name {having}
             ORDER BY spend DESC LIMIT {int(limit)}""",
         [start, end, *params],
     ).fetchall()

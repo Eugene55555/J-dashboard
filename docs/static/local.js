@@ -290,8 +290,10 @@ window.LocalAPI = (() => {
     });
     return [...grouped.entries()].map(([, list]) => {
       const first = list[0];
+      const meta = campaignMap().get(first[1]) || {};
       return ratios({
-        search_term: first[4], campaign_id: first[1], ad_group_id: first[2], target_id: first[3],
+        search_term: first[4], campaign_id: first[1], campaign_name: meta.name || first[1],
+        ad_group_id: first[2], target_id: first[3],
         targeting: first[5], match_type: first[6],
         ...sum(list, (r) => ({ impressions: r[7], clicks: r[8], spend: r[9], orders: r[10], sales: r[11], units: r[12] })),
       });
