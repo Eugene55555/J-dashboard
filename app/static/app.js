@@ -30,6 +30,7 @@ function savePrefs() {
       targetKind: state.targetKind || 'positive', targetSearch: state.targetSearch || '',
       termSearch: state.termSearch || '', termOrders: !!state.termOrders,
       changeSearch: state.changeSearch || '', chart: state.chart || 'money',
+      sort: state.sort || {},
     }));
   } catch (e) { /* приватный режим — молча пропускаем */ }
 }
@@ -403,6 +404,7 @@ function bindSorts(root, redraw) {
       const key = th.dataset.key;
       const cur = state.sort[id] || {};
       state.sort[id] = { key, dir: cur.key === key && cur.dir === 'desc' ? 'asc' : 'desc' };
+      savePrefs();
       redraw();
     };
   });
@@ -1018,6 +1020,7 @@ async function boot() {
   state.termOrders = !!prefs.termOrders;
   state.changeSearch = prefs.changeSearch || '';
   state.chart = prefs.chart || 'money';
+  state.sort = prefs.sort && typeof prefs.sort === 'object' ? prefs.sort : {};
   paintChrome(state.view);
 
   const logout = $('#btn-logout');
