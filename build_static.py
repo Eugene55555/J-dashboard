@@ -95,9 +95,17 @@ def write_ui(out_dir: Path, *, encrypted: bool) -> None:
     html = html.replace('<meta name="viewport"',
                         '<meta name="robots" content="noindex, nofollow">\n<meta name="viewport"')
     if encrypted:
+        # Версия в URL: без неё браузер или CDN могут отдать старый файл данных
+        # (у GitHub Pages max-age=600) и вход «не подойдёт» с новым паролем.
+        data_file = out_dir / "data.enc.json"
+        version = hashlib.sha256(data_file.read_bytes()).hexdigest()[:12] if data_file.is_file() else ""
+        data_url = "data.enc.json" + (f"?v={version}" if version else "")
         html = html.replace('window.J_STATIC = { dataUrl: "data.json" };',
-                            'window.J_STATIC = { dataUrl: "data.enc.json", encrypted: true };')
+                            f'window.J_STATIC = {{ dataUrl: "{data_url}", encrypted: true }};')
         html = html.replace('<div class="shell">', GATE_HTML + '\n<div class="shell">')
+    elif (out_dir / "data.json").is_file():
+        version = hashlib.sha256((out_dir / "data.json").read_bytes()).hexdigest()[:12]
+        html = html.replace('dataUrl: "data.json"', f'dataUrl: "data.json?v={version}"')
     assert "J_STATIC" in html and 'href="static/style.css"' in html
     for name in ("style.css", "app.js", "local.js"):
         version = hashlib.sha256((assets / name).read_bytes()).hexdigest()[:12]
@@ -194,8 +202,6 @@ def build(account_id: str, out_dir: Path, password: str = "", login: str = "euge
         "runs": runs,
     }
 
-    write_ui(out_dir, encrypted=bool(password))
-
     plain_path = out_dir / "data.json"
     enc_path = out_dir / "data.enc.json"
     if password:
@@ -210,6 +216,7 @@ def build(account_id: str, out_dir: Path, password: str = "", login: str = "euge
         if enc_path.exists():
             enc_path.unlink()
         data_path = plain_path
+    write_ui(out_dir, encrypted=bool(password))  # после данных: версия в URL считается по файлу
     return {
         "account": account.id,
         "out": str(out_dir),
