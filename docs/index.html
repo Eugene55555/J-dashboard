@@ -5,7 +5,7 @@
 <meta name="robots" content="noindex, nofollow">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>J-dashboard · Amazon Ads</title>
-<link rel="stylesheet" href="static/style.css">
+<link rel="stylesheet" href="static/style.css?v=a6fe82b22af9">
 </head>
 <body>
 <div class="gate hidden" id="gate">
@@ -16,11 +16,11 @@
         <div class="brand-sub">Amazon Ads · приватный доступ</div></div>
     </div>
     <label for="gate-login">Логин</label>
-    <input id="gate-login" type="text" autocapitalize="none" autocomplete="username">
+    <input id="gate-login" required type="text" autocapitalize="none" autocomplete="username">
     <label for="gate-password">Пароль</label>
-    <input id="gate-password" type="password" autocomplete="current-password">
+    <input id="gate-password" required type="password" autocomplete="current-password">
     <button class="btn primary" type="submit" id="gate-btn">Войти</button>
-    <div class="gate-err" id="gate-error"></div>
+    <div class="gate-err" id="gate-error" role="alert"></div>
   </form>
 </div>
 <div class="shell">
@@ -94,13 +94,13 @@
         <div class="page-sub" id="view-sub"></div>
       </div>
       <div class="top-actions">
-        <button class="btn ghost filters-toggle" id="filters-toggle" type="button">Фильтры ▾</button>
+        <button class="btn ghost filters-toggle" id="filters-toggle" aria-controls="dashboard-filters" aria-expanded="false" type="button">Фильтры ▾</button>
         <span class="pill" id="pill-days">—</span>
         <span class="pill" id="pill-sync" title="Данные обновляет агент по запросу владельца">обновление — по запросу</span>
       </div>
     </div>
 
-    <section class="filters">
+    <section class="filters" id="dashboard-filters" aria-label="Фильтры отчёта">
       <div class="seg" id="presets">
         <button data-preset="1">1 день</button>
         <button data-preset="7" class="active">7 дней</button>
@@ -112,9 +112,9 @@
         <button data-preset="custom">Свой</button>
       </div>
       <div class="dates" id="dates">
-        <input type="date" id="date-start">
+        <input type="date" id="date-start" aria-label="Начало периода">
         <span>—</span>
-        <input type="date" id="date-end">
+        <input type="date" id="date-end" aria-label="Конец периода">
       </div>
       <div class="spacer"></div>
       <select class="select-mini" id="status-filter" title="Статус кампании">
@@ -146,8 +146,8 @@
 
 <div class="tooltip" id="tooltip"></div>
 
-<script>window.J_STATIC = { dataUrl: "data.enc.json", encrypted: true, login: "eugene" };</script>
-<script src="static/local.js"></script>
-<script src="static/app.js"></script>
+<script>window.J_STATIC = { dataUrl: "data.enc.json", encrypted: true };</script>
+<script src="static/local.js?v=f61fdab343f6"></script>
+<script src="static/app.js?v=4b9681bde21b"></script>
 </body>
 </html>

@@ -1,14 +1,15 @@
 """Собрать статический сайт для GitHub Pages из базы дашборда.
 
-    python3 build_static.py --account eugene --out docs
+    python3 build_static.py --ui-only --out docs
 
-Скрипт не меняет рекламу и не ходит в Amazon: он только читает SQLite и
-раскладывает данные в docs/data.json вместе с готовым интерфейсом.
+Скрипт не меняет рекламу и не ходит в Amazon. Режим --ui-only обновляет
+интерфейс без доступа к базе; сборка данных для Pages требует шифрования.
 """
 from __future__ import annotations
 
 import argparse
 import base64
+import hashlib
 import json
 import os
 import secrets
@@ -36,11 +37,11 @@ GATE_HTML = """<div class="gate hidden" id="gate">
         <div class="brand-sub">Amazon Ads · приватный доступ</div></div>
     </div>
     <label for="gate-login">Логин</label>
-    <input id="gate-login" type="text" autocapitalize="none" autocomplete="username">
+    <input id="gate-login" required type="text" autocapitalize="none" autocomplete="username">
     <label for="gate-password">Пароль</label>
-    <input id="gate-password" type="password" autocomplete="current-password">
+    <input id="gate-password" required type="password" autocomplete="current-password">
     <button class="btn primary" type="submit" id="gate-btn">Войти</button>
-    <div class="gate-err" id="gate-error"></div>
+    <div class="gate-err" id="gate-error" role="alert"></div>
   </form>
 </div>"""
 ITERATIONS = 200_000
@@ -70,7 +71,45 @@ def rows(conn, sql: str) -> list[dict]:
     return [dict(r) for r in conn.execute(sql)]
 
 
+def refresh_ui(out_dir: Path) -> None:
+    """Обновить только интерфейс, не читая базу и не меняя шифротекст."""
+    if not (out_dir / 'data.enc.json').is_file() or (out_dir / 'data.json').exists():
+        raise SystemExit('Для --ui-only нужна защищённая сборка без открытого data.json')
+    write_ui(out_dir, encrypted=True)
+
+
+def write_ui(out_dir: Path, *, encrypted: bool) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    assets = out_dir / "static"
+    assets.mkdir(exist_ok=True)
+    (assets / "style.css").write_text((STATIC_SRC / "style.css").read_text(encoding="utf-8"), encoding="utf-8")
+    (assets / "app.js").write_text((STATIC_SRC / "app.js").read_text(encoding="utf-8"), encoding="utf-8")
+    (assets / "local.js").write_text((STATIC_SRC / "local.js").read_text(encoding="utf-8"), encoding="utf-8")
+
+    html = (STATIC_SRC / "index.html").read_text(encoding="utf-8")
+    html = html.replace('href="/static/style.css"', 'href="static/style.css"')
+    html = html.replace('<script src="/static/app.js"></script>',
+                        '<script>window.J_STATIC = { dataUrl: "data.json" };</script>\n'
+                        '<script src="static/local.js"></script>\n'
+                        '<script src="static/app.js"></script>')
+    html = html.replace('<meta name="viewport"',
+                        '<meta name="robots" content="noindex, nofollow">\n<meta name="viewport"')
+    if encrypted:
+        html = html.replace('window.J_STATIC = { dataUrl: "data.json" };',
+                            'window.J_STATIC = { dataUrl: "data.enc.json", encrypted: true };')
+        html = html.replace('<div class="shell">', GATE_HTML + '\n<div class="shell">')
+    assert "J_STATIC" in html and 'href="static/style.css"' in html
+    for name in ("style.css", "app.js", "local.js"):
+        version = hashlib.sha256((assets / name).read_bytes()).hexdigest()[:12]
+        html = html.replace(f'"static/{name}"', f'"static/{name}?v={version}"')
+    (out_dir / "index.html").write_text(html, encoding="utf-8")
+    (out_dir / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
+    (out_dir / ".nojekyll").write_text("", encoding="utf-8")
+
+
 def build(account_id: str, out_dir: Path, password: str = "", login: str = "eugene") -> dict:
+    if not password and out_dir.resolve().is_relative_to((ROOT / 'docs').resolve()):
+        raise SystemExit('В каталоге публикации и его подпапках разрешены только --ui-only или сборка с паролем')
     accounts = settings.accounts()
     if account_id not in accounts:
         raise SystemExit(f"нет кабинета {account_id}; есть: {', '.join(accounts)}")
@@ -155,29 +194,7 @@ def build(account_id: str, out_dir: Path, password: str = "", login: str = "euge
         "runs": runs,
     }
 
-    out_dir.mkdir(parents=True, exist_ok=True)
-    assets = out_dir / "static"
-    assets.mkdir(exist_ok=True)
-    (assets / "style.css").write_text((STATIC_SRC / "style.css").read_text(encoding="utf-8"), encoding="utf-8")
-    (assets / "app.js").write_text((STATIC_SRC / "app.js").read_text(encoding="utf-8"), encoding="utf-8")
-    (assets / "local.js").write_text((STATIC_SRC / "local.js").read_text(encoding="utf-8"), encoding="utf-8")
-
-    html = (STATIC_SRC / "index.html").read_text(encoding="utf-8")
-    html = html.replace('href="/static/style.css"', 'href="static/style.css"')
-    html = html.replace('<script src="/static/app.js"></script>',
-                        '<script>window.J_STATIC = { dataUrl: "data.json" };</script>\n'
-                        '<script src="static/local.js"></script>\n'
-                        '<script src="static/app.js"></script>')
-    html = html.replace('<meta name="viewport"',
-                        '<meta name="robots" content="noindex, nofollow">\n<meta name="viewport"')
-    if password:
-        html = html.replace('window.J_STATIC = { dataUrl: "data.json" };',
-                            'window.J_STATIC = { dataUrl: "data.enc.json", encrypted: true, login: "%s" };' % login)
-        html = html.replace('<div class="shell">', GATE_HTML + '\n<div class="shell">')
-    assert "J_STATIC" in html and 'href="static/style.css"' in html
-    (out_dir / "index.html").write_text(html, encoding="utf-8")
-    (out_dir / "robots.txt").write_text("User-agent: *\nDisallow: /\n", encoding="utf-8")
-    (out_dir / ".nojekyll").write_text("", encoding="utf-8")
+    write_ui(out_dir, encrypted=bool(password))
 
     plain_path = out_dir / "data.json"
     enc_path = out_dir / "data.enc.json"
@@ -212,10 +229,15 @@ def main() -> None:
     parser.add_argument("--out", default="docs")
     parser.add_argument("--password", default="", help="включить вход по паролю (шифрование data.json)")
     parser.add_argument("--login", default="eugene", help="логин для страницы входа")
+    parser.add_argument('--ui-only', action='store_true', help='обновить интерфейс, сохранив зашифрованные данные и пароль')
     args = parser.parse_args()
     out = Path(args.out)
     if not out.is_absolute():
         out = ROOT / out
+    if args.ui_only:
+        refresh_ui(out)
+        print('Обновлён интерфейс; данные не изменены.')
+        return
     print(json.dumps(build(args.account, out, args.password, args.login),
                      ensure_ascii=False, indent=2))
 
