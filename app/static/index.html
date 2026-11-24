@@ -78,13 +78,13 @@
         <div class="page-sub" id="view-sub"></div>
       </div>
       <div class="top-actions">
-        <button class="btn ghost filters-toggle" id="filters-toggle" type="button">Фильтры ▾</button>
+        <button class="btn ghost filters-toggle" id="filters-toggle" aria-controls="dashboard-filters" aria-expanded="false" type="button">Фильтры ▾</button>
         <span class="pill" id="pill-days">—</span>
         <span class="pill" id="pill-sync" title="Данные обновляет агент по запросу владельца">обновление — по запросу</span>
       </div>
     </div>
 
-    <section class="filters">
+    <section class="filters" id="dashboard-filters" aria-label="Фильтры отчёта">
       <div class="seg" id="presets">
         <button data-preset="1">1 день</button>
         <button data-preset="7" class="active">7 дней</button>
@@ -96,9 +96,9 @@
         <button data-preset="custom">Свой</button>
       </div>
       <div class="dates" id="dates">
-        <input type="date" id="date-start">
+        <input type="date" id="date-start" aria-label="Начало периода">
         <span>—</span>
-        <input type="date" id="date-end">
+        <input type="date" id="date-end" aria-label="Конец периода">
       </div>
       <div class="spacer"></div>
       <select class="select-mini" id="status-filter" title="Статус кампании">

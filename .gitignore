@@ -1,6 +1,7 @@
 # Данные и секреты не коммитим.
 data/
 *.db
+/docs/**/data.json
 *.db-wal
 *.db-shm
 .env

@@ -12,6 +12,7 @@ const state = {
   selected: new Set(),
   meta: null,
   sort: {},
+  pages: {},
   chart: 'money',
   token: 0,
 };
@@ -27,6 +28,7 @@ function savePrefs() {
     localStorage.setItem(STORE_KEY, JSON.stringify({
       view: state.view, preset: state.preset, start: state.start, end: state.end,
       status: state.status, all: state.all, selected: [...state.selected],
+      campaignSearch: state.campaignSearch || '',
       targetKind: state.targetKind || 'positive', targetSearch: state.targetSearch || '',
       termSearch: state.termSearch || '', termOrders: !!state.termOrders,
       changeSearch: state.changeSearch || '', chart: state.chart || 'money',
@@ -108,7 +110,7 @@ function query() {
   const p = new URLSearchParams();
   if (state.start) p.set('start', state.start);
   if (state.end) p.set('end', state.end);
-  if (!state.all && state.selected.size) p.set('campaigns', [...state.selected].join(','));
+  if (!state.all) p.set('campaigns', [...state.selected].join(',') || '__none__');
   if (state.status) p.set('status', state.status);
   return p;
 }
@@ -122,7 +124,7 @@ function setPeriod(preset) {
   else if (preset === 'all') {
     // Весь загруженный период: от первого дня в базе до последнего.
     const meta = state.meta || {};
-    state.start = meta.date_min || isoAdd(today, -365);
+    state.start = (state.view === 'changes' && meta.changes_min) || meta.date_min || isoAdd(today, -365);
     state.end = meta.date_max || today;
   }
   else if (preset === 'custom') { /* даты из полей */ }
@@ -169,16 +171,19 @@ function applyFiltersVisibility() {
     if (!b.dataset.full) b.dataset.full = label.textContent;
     label.textContent = mobile ? (b.dataset.short || b.dataset.full) : b.dataset.full;
   });
-  $('.filters').classList.toggle('hidden', state.view === 'data' || (mobile && !state.filtersOpen));
+  $('.filters').classList.toggle('hidden', mobile && !state.filtersOpen);
+  $('.filters').classList.toggle('dates-only', state.view === 'data');
   const toggle = $('#filters-toggle');
   if (toggle) {
     toggle.classList.toggle('hidden', !mobile);
-    toggle.textContent = 'Фильтры ' + (state.filtersOpen ? '▴' : '▾');
+    toggle.setAttribute('aria-expanded', String(!mobile || !!state.filtersOpen));
+    toggle.textContent = (state.view === 'data' ? 'Период ' : 'Фильтры ') + (state.filtersOpen ? '▴' : '▾');
   }
 }
 
 function setView(view) {
   state.view = view;
+  if (state.preset === 'all' && state.meta) setPeriod('all');
   paintChrome(view);
   savePrefs();
   render();
@@ -256,9 +261,17 @@ function sparkline(canvas, values, color = '#ff9900') {
   ctx.fill();
 }
 
+function chartAxes(series, mode) {
+  const keys = mode === 'volume' ? ['clicks','impressions'] : mode === 'efficiency' ? ['acos','cpc'] : ['spend','sales'];
+  const peaks = keys.map(key => series.reduce((max,row) => Math.max(max, row[key] || 0), 0));
+  if (mode === 'money') peaks.fill(Math.max(...peaks));
+  const max = x => x > 0 ? x * 1.12 : 1;
+  return {left:max(peaks[0]), right:max(peaks[1])};
+}
+
 function comboChart(canvas, series, mode) {
   const { ctx, w, h } = prepare(canvas);
-  const padL = 54, padR = 16, padT = 16, padB = 26;
+  const padL = 50, padR = mode === 'money' ? 16 : 54, padT = 16, padB = 26;
   const plotW = w - padL - padR;
   const plotH = h - padT - padB;
   ctx.clearRect(0, 0, w, h);
@@ -271,7 +284,7 @@ function comboChart(canvas, series, mode) {
     ],
     volume: [
       { key: 'clicks', color: '#ff9900', type: 'bar', label: 'Клики', fmt: fmtInt },
-      { key: 'impressions', color: '#4aa8ff', type: 'line', label: 'Показы', fmt: fmtInt, scale: 0.35 },
+      { key: 'impressions', color: '#4aa8ff', type: 'line', label: 'Показы', fmt: fmtInt },
     ],
     efficiency: [
       { key: 'acos', color: '#ff9900', type: 'line', label: 'ACOS, %', fmt: (v) => fmtPct(v, 1) },
@@ -279,11 +292,8 @@ function comboChart(canvas, series, mode) {
     ],
   };
   const items = defs[mode] || defs.money;
-  const maxBy = {};
-  items.forEach((it) => {
-    // 12% запаса сверху, чтобы максимальный столбец не упирался в рамку
-    maxBy[it.key] = Math.max(...series.map((r) => r[it.key] || 0), 0) * (it.scale || 1) * 1.12 || 1;
-  });
+  const axes = chartAxes(series, mode);
+  const maxBy = {[items[0].key]:axes.left, [items[1].key]:axes.right};
 
   // сетка
   ctx.strokeStyle = 'rgba(30,44,68,.75)';
@@ -295,17 +305,23 @@ function comboChart(canvas, series, mode) {
     ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
     const top = maxBy[items[0].key] || 0;
     const val = top - (top / 4) * i;
-    ctx.fillText(mode === 'efficiency' ? fmtNum(val, 1) : (mode === 'money' ? '$' + fmtMoney0(val) : fmtInt(val)), padL - 8, y + 3.5);
+    ctx.textAlign = 'right';
+    ctx.fillText(mode === 'efficiency' ? fmtPct(val, 1) : (mode === 'money' ? '$' + (top < 5 ? fmtMoney(val) : fmtMoney0(val)) : fmtInt(val)), padL - 6, y + 3.5);
+    if (mode !== 'money') {
+      const right = axes.right * (1 - i / 4);
+      ctx.textAlign = 'left';
+      ctx.fillText(mode === 'volume' ? fmtInt(right) : '$' + fmtMoney(right), w - padR + 6, y + 3.5);
+    }
   }
 
   const step = series.length > 1 ? plotW / series.length : plotW;
   const barW = Math.max(3, Math.min(26, step * 0.55));
 
   ctx.textAlign = 'center';
-  const labelEvery = Math.ceil(series.length / 9);
+  const labelEvery = Math.max(1, Math.ceil(series.length / Math.max(2, Math.floor(plotW / 46))));
   series.forEach((row, i) => {
     const x = padL + step * i + step / 2;
-    if (i % labelEvery === 0 || i === series.length - 1) {
+    if ((i % labelEvery === 0 && (series.length - 1 - i) * step >= 40) || i === series.length - 1) {
       const label = row.bucket.length === 7 ? row.bucket.slice(5) + '.' + row.bucket.slice(0, 4)
         : row.bucket.slice(8) + '.' + row.bucket.slice(5, 7);
       ctx.fillStyle = '#61758f';
@@ -329,17 +345,21 @@ function comboChart(canvas, series, mode) {
 
   items.filter((it) => it.type === 'line').forEach((it) => {
     ctx.beginPath();
+    let segment = false;
     series.forEach((row, i) => {
+      if (row[it.key] == null) { segment = false; return; }
       const x = padL + step * i + step / 2;
       const max = maxBy[it.key] || 1;
       const y = padT + plotH - ((row[it.key] || 0) * (it.scale || 1) / max) * plotH;
-      i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      segment ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+      segment = true;
     });
     ctx.strokeStyle = it.color;
     ctx.lineWidth = 2;
     ctx.lineJoin = 'round';
     ctx.stroke();
     series.forEach((row, i) => {
+      if (row[it.key] == null) return;
       const x = padL + step * i + step / 2;
       const max = maxBy[it.key] || 1;
       const y = padT + plotH - ((row[it.key] || 0) * (it.scale || 1) / max) * plotH;
@@ -388,6 +408,7 @@ function sortRows(rows, key, dir) {
   if (!key) return rows;
   return [...rows].sort((a, b) => {
     const va = a[key], vb = b[key];
+    if (va == null && vb == null) return 0;
     if (va === null || va === undefined) return 1;
     if (vb === null || vb === undefined) return -1;
     if (typeof va === 'number' && typeof vb === 'number') return dir === 'asc' ? va - vb : vb - va;
@@ -395,17 +416,25 @@ function sortRows(rows, key, dir) {
   });
 }
 
-const MOBILE_ROWS = 300;
+const MOBILE_ROWS = 25;
+const DESKTOP_ROWS = 100;
 
 function tableHtml(id, columns, rows, opts = {}) {
   const sort = state.sort[id] || { key: opts.defaultSort, dir: opts.defaultDir || 'desc' };
   const compactMode = window.matchMedia('(max-width: 820px)').matches;
   const full = sortRows(rows, sort.key, sort.dir);
-  const data = compactMode && full.length > MOBILE_ROWS ? full.slice(0, MOBILE_ROWS) : full;
-  const truncated = full.length - data.length;
+  const size = compactMode ? MOBILE_ROWS : DESKTOP_ROWS;
+  const last = Math.max(0, Math.ceil(full.length / size) - 1);
+  const page = Math.min(last, Math.max(0, state.pages[id] || 0));
+  const offset = page * size;
+  const data = full.slice(offset, offset + size);
+  const pager = last ? `<div class="page-tools" aria-label="Страницы таблицы">
+    <span>${fmtInt(offset + 1)}–${fmtInt(offset + data.length)} из ${fmtInt(full.length)}</span>
+    <button type="button" class="btn" data-page="${page - 1}" data-list="${id}" ${page ? '' : 'disabled'}>Назад</button>
+    <button type="button" class="btn" data-page="${page + 1}" data-list="${id}" ${page < last ? '' : 'disabled'}>Далее</button></div>` : '';
   const head = columns.map((c) => {
     const arrow = sort.key === c.key ? `<span class="arrow">${sort.dir === 'asc' ? '▲' : '▼'}</span>` : '';
-    return `<th class="${c.left ? 'left' : ''}" data-sort-table="${id}" data-key="${c.key}" style="${c.width ? `width:${c.width}` : ''}">${c.label}${arrow}</th>`;
+    return `<th class="${c.left ? 'left' : ''}" aria-sort="${sort.key === c.key ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none'}" style="${c.width ? `width:${c.width}` : ''}"><button type="button" class="th-sort" data-sort-table="${id}" data-key="${c.key}" data-dir="${sort.key === c.key ? sort.dir : ''}">${c.label}${arrow}</button></th>`;
   }).join('');
   const body = data.map((row) => `<tr>${columns.map((c) => {
     const cls = c.left ? 'left' : '';
@@ -416,37 +445,50 @@ function tableHtml(id, columns, rows, opts = {}) {
   const compact = compactMode;
   const sorter = compact ? `
     <div class="sort-mobile">
-      <span>Сортировка</span>
-      <select data-sort-select="${id}">
-        ${columns.map((c) => `<option value="${esc(c.key)}" ${sort.key === c.key ? 'selected' : ''}>${esc(c.label)}${sort.key === c.key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}</option>`).join('')}
-      </select>
+      <label for="sort-${id}">Сортировка</label>
+      <select id="sort-${id}" data-sort-select="${id}">
+        ${columns.map((c) => `<option value="${esc(c.key)}" ${sort.key === c.key ? 'selected' : ''}>${esc(c.label)}</option>`).join('')}
+      </select><button class="btn" type="button" data-sort-direction="${id}" data-key="${esc(sort.key)}" data-dir="${sort.dir}" aria-label="${sort.dir === 'asc' ? 'По возрастанию. Сменить порядок' : 'По убыванию. Сменить порядок'}">${sort.dir === 'asc' ? '↑' : '↓'}</button>
     </div>` : '';
 
-  return `<div class="table-wrap"><table>
+  return `<div class="table-section" id="list-${id}">${sorter}${pager}<div class="table-wrap"><table>
     <thead><tr>${head}</tr></thead>
     <tbody>${body || `<tr><td colspan="${columns.length}"><div class="empty"><b>Нет данных за период</b>Измените даты или кампанию</div></td></tr>`}</tbody>
-  </table></div>${truncated > 0 ? `<div class="rows-note">Показаны первые ${MOBILE_ROWS} строк из ${full.length} — уточните период, кампанию или поиск.</div>` : ''}${sorter}`;
+  </table></div>${pager}</div>`;
 }
 
 function totalsRow(columns, rows) { return null; }
 
 function bindSorts(root, redraw) {
+  $$('[data-page]', root).forEach((btn) => {
+    btn.onclick = async () => {
+      const id = btn.dataset.list;
+      state.pages[id] = Number(btn.dataset.page);
+      const bottom = btn.closest('.page-tools').previousElementSibling?.classList.contains('table-wrap');
+      await redraw();
+      const section = document.getElementById('list-' + id);
+      if (!section) return;
+      if (bottom) section.scrollIntoView({block:'start'});
+      const next = section.querySelector('.page-tools button:not(:disabled)');
+      next?.focus({preventScroll:true});
+    };
+  });
   $$('[data-sort-select]', root).forEach((select) => {
     select.onchange = () => {
       const id = select.dataset.sortSelect;
       const key = select.value;
-      const cur = state.sort[id] || {};
-      state.sort[id] = { key, dir: cur.key === key && cur.dir === 'asc' ? 'desc' : (cur.key === key ? 'asc' : 'desc') };
+      state.pages[id] = 0;
+      state.sort[id] = { key, dir: 'desc' };
       savePrefs();
       redraw();
     };
   });
-  $$('[data-sort-table]', root).forEach((th) => {
+  $$('[data-sort-table], [data-sort-direction]', root).forEach((th) => {
     th.onclick = () => {
-      const id = th.dataset.sortTable;
+      const id = th.dataset.sortTable || th.dataset.sortDirection;
       const key = th.dataset.key;
-      const cur = state.sort[id] || {};
-      state.sort[id] = { key, dir: cur.key === key && cur.dir === 'desc' ? 'asc' : 'desc' };
+      state.pages[id] = 0;
+      state.sort[id] = { key, dir: th.dataset.dir === 'desc' ? 'asc' : 'desc' };
       savePrefs();
       redraw();
     };
@@ -459,9 +501,9 @@ function nameCell(name, stateVal, sub) {
 }
 
 function budgetCell(r) {
-  if (!r.budget) return '—';
+  if (r.budget == null) return '—';
   const suffix = r.budget_type === 'DAILY' ? '/день' : (r.budget_type === 'LIFETIME' ? ' всего' : '');
-  return '$' + fmtMoney0(r.budget) + suffix;
+  return '$' + (Number.isInteger(r.budget) ? fmtMoney0(r.budget) : fmtMoney(r.budget)) + suffix;
 }
 
 function barCell(value, max, text) {
@@ -525,8 +567,8 @@ views.overview = async () => {
           <div class="legend" style="margin-top:8px">${state.chart === 'money'
             ? '<span><i style="background:#ff9900"></i>Расход</span><span><i class="line" style="background:#4aa8ff"></i>Продажи</span>'
             : state.chart === 'volume'
-              ? '<span><i style="background:#ff9900"></i>Клики</span><span><i class="line" style="background:#4aa8ff"></i>Показы (×0,35)</span>'
-              : '<span><i class="line" style="background:#ff9900"></i>ACOS, %</span><span><i class="line" style="background:#4aa8ff"></i>CPC</span>'}</div>
+              ? '<span><i style="background:#ff9900"></i>Клики · слева</span><span><i class="line" style="background:#4aa8ff"></i>Показы · справа</span>'
+              : '<span><i class="line" style="background:#ff9900"></i>ACOS · слева</span><span><i class="line" style="background:#4aa8ff"></i>CPC, $ · справа</span>'}</div>
         </div>
       </div>
       <div class="card">
@@ -560,7 +602,9 @@ views.overview = async () => {
 };
 
 views.campaigns = async () => {
-  const rows = await api('/api/campaigns?' + query());
+  const allRows = await api('/api/campaigns?' + query());
+  const q = (state.campaignSearch || '').trim().toLowerCase();
+  const rows = allRows.filter(r => !q || [r.name, r.campaign_id].some(v => String(v ?? '').toLowerCase().includes(q)));
   const maxSpend = Math.max(...rows.map((r) => r.spend || 0), 1);
   const total = rows.reduce((a, r) => ({
     spend: a.spend + (r.spend || 0), sales: a.sales + (r.sales || 0),
@@ -571,8 +615,8 @@ views.campaigns = async () => {
   return `
     <div class="card" style="margin-top:16px">
       <div class="table-tools">
-        <input class="search" id="cmp-search" placeholder="Поиск по названию или ID…">
-        <span class="pill">${rows.length} кампаний</span>
+        <input class="search" id="cmp-search" aria-label="Поиск кампаний" value="${esc(state.campaignSearch)}" placeholder="Поиск по названию или ID…">
+        <span class="pill">${fmtInt(rows.length)} ${plural(rows.length, ['кампания','кампании','кампаний'])}</span>
         <span class="pill">Расход $${fmtMoney(total.spend)}</span>
         <span class="pill">Продажи $${fmtMoney(total.sales)}</span>
         <span class="pill">ACOS ${fmtPct(total.sales ? total.spend / total.sales * 100 : null, 1)}</span>
@@ -680,7 +724,7 @@ views.placements = async () => {
   const maxSpend = Math.max(...rows.map((r) => r.spend || 0), 1);
 
   return `
-    <div class="kpis" style="grid-template-columns:repeat(3,minmax(0,1fr))">
+    <div class="kpis placement-kpis">
       ${totals.map((t) => `<div class="kpi">
         <div class="label">${esc(t.placement)}</div>
         <div class="value">$${fmtMoney(t.spend)}</div>
@@ -728,7 +772,6 @@ views.products = async () => {
 
 views.changes = async () => {
   const p = query();
-  if (state.preset === 'all' && state.meta && state.meta.changes_min) p.set('start', state.meta.changes_min);
   if (state.changeSearch) p.set('q', state.changeSearch);
   const rows = await api('/api/changes?' + p);
   const srcLabel = {
@@ -796,8 +839,8 @@ views.data = async () => {
   const lastRun = cov.runs[0];
 
   return `
-    <div class="kpis" style="grid-template-columns:repeat(4,minmax(0,1fr));margin-top:16px">
-      <div class="kpi"><div class="label">Период данных</div><div class="value" style="font-size:17px;white-space:nowrap">${fmtDate(meta.date_min)} → ${fmtDate(meta.date_max)}</div><div class="sub">дней в базе: ${fmtInt(meta.coverage_days || (meta.date_min && meta.date_max ? Math.round((Date.parse(meta.date_max) - Date.parse(meta.date_min)) / 86400000) + 1 : 0))}</div></div>
+    <div class="kpis data-kpis">
+      <div class="kpi"><div class="label">Период данных</div><div class="value data-span">${fmtDate(meta.date_min)} → ${fmtDate(meta.date_max)}</div><div class="sub">дней в базе: ${fmtInt(meta.coverage_days || (meta.date_min && meta.date_max ? Math.round((Date.parse(meta.date_max) - Date.parse(meta.date_min)) / 86400000) + 1 : 0))}</div></div>
       <div class="kpi"><div class="label">Строк фактов</div><div class="value">${fmtInt(meta.counts.fact_campaign_day)}</div><div class="sub">campaign-level за все дни</div></div>
       <div class="kpi"><div class="label">Объекты</div><div class="value">${fmtInt(meta.targets)}<span style="font-size:14px;color:var(--muted)"> / ${fmtInt(meta.negatives)}</span></div><div class="sub">таргетов / негативов</div></div>
       <div class="kpi"><div class="label">События журнала</div><div class="value">${fmtInt(meta.counts.changes)}</div><div class="sub">${meta.counts.changes ? 'изменения настроек и история Amazon' : 'появятся после следующей синхронизации'}</div></div>
@@ -846,20 +889,43 @@ function subtitle() {
   return `${base} · ${tail}`;
 }
 
-async function render() {
+async function render(searchInput = null) {
   const token = ++state.token;
   $('#view-sub').innerHTML = subtitle();
   const view = $('#view');
-  view.innerHTML = skeleton();
+  if (!searchInput) view.innerHTML = skeleton();
   try {
     const html = await views[state.view]();
     if (token !== state.token) return;
-    view.innerHTML = html;
+    if (searchInput?.isConnected) {
+      // Меняем результаты, не удаляя поле и не закрывая клавиатуру телефона.
+      const fresh = document.createElement('template');
+      fresh.innerHTML = html.trim();
+      const tools = searchInput.closest('.table-tools');
+      const incoming = fresh.content.querySelector('.table-tools');
+      const pills = $$('.pill', incoming);
+      $$('.pill', tools).forEach((el, i) => { if (pills[i]) el.textContent = pills[i].textContent; });
+      while (tools.nextElementSibling) tools.nextElementSibling.remove();
+      while (incoming.nextElementSibling) tools.parentNode.append(incoming.nextElementSibling);
+    } else view.innerHTML = html;
     afterRender();
   } catch (err) {
     if (token !== state.token) return;
     view.innerHTML = `<div class="card"><div class="card-body"><div class="empty"><b>Не удалось загрузить</b>${esc(err.message)}</div></div></div>`;
   }
+}
+
+let searchTimer;
+function bindSearch(selector, field) {
+  const input = $(selector);
+  input.oninput = () => {
+    clearTimeout(searchTimer);
+    state[field] = input.value;
+    state.pages = {};
+    savePrefs();
+    ++state.token;
+    searchTimer = setTimeout(() => { if (input.isConnected) render(input); }, 200);
+  };
 }
 
 function afterRender() {
@@ -892,17 +958,7 @@ function afterRender() {
   }
 
   if (state.view === 'campaigns') {
-    const input = $('#cmp-search');
-    let timer;
-    input.oninput = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        const q = input.value.toLowerCase();
-        $$('#cmp-table tbody tr').forEach((tr) => {
-          tr.style.display = tr.textContent.toLowerCase().includes(q) ? '' : 'none';
-        });
-      }, 120);
-    };
+    bindSearch('#cmp-search', 'campaignSearch');
     bindSorts($('#view'), render);
   }
 
@@ -910,22 +966,12 @@ function afterRender() {
     $$('#target-kind button').forEach((b) => {
       b.onclick = () => { state.targetKind = b.dataset.kind; savePrefs(); render(); };
     });
-    const input = $('#tgt-search');
-    let timer;
-    input.oninput = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => { state.targetSearch = input.value.trim(); savePrefs(); render(); }, 350);
-    };
+    bindSearch('#tgt-search', 'targetSearch');
     bindSorts($('#view'), render);
   }
 
   if (state.view === 'terms') {
-    const input = $('#term-search');
-    let timer;
-    input.oninput = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => { state.termSearch = input.value.trim(); savePrefs(); render(); }, 350);
-    };
+    bindSearch('#term-search', 'termSearch');
     $('#term-orders').onchange = (e) => { state.termOrders = e.target.checked; savePrefs(); render(); };
     bindSorts($('#view'), render);
   }
@@ -933,15 +979,10 @@ function afterRender() {
   if (state.view === 'changes') {
     const all = $('#chg-all');
     if (all) all.onclick = () => { setPeriod('all'); render(); };
-    const input = $('#chg-search');
-    let timer;
-    input.oninput = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => { state.changeSearch = input.value.trim(); savePrefs(); render(); }, 350);
-    };
+    bindSearch('#chg-search', 'changeSearch');
   }
 
-  if (['overview', 'products', 'placements'].includes(state.view)) bindSorts($('#view'), render);
+  if (['products', 'placements', 'data'].includes(state.view)) bindSorts($('#view'), render);
 
 }
 
@@ -953,7 +994,7 @@ async function loadMeta() {
   localStorage.setItem('jd_account', acct.id);
   const select = $('#account-select');
   select.innerHTML = (state.meta.accounts || [{ id: acct.id, label: acct.name }])
-    .map((a) => `<option value="${esc(a.id)}" ${a.id === acct.id ? 'selected' : ''}>${esc(a.label)}</option>`)
+    .map((a) => `<option value="${esc(a.id)}" ${a.id === acct.id ? 'selected' : ''}>${esc(a.label || a.name || a.id)}</option>`)
     .join('');
   select.onchange = async () => {
     state.account = select.value;
@@ -984,7 +1025,6 @@ function buildPicker() {
   $$('#picker-list input').forEach((cb) => {
     cb.onchange = () => {
       if (cb.checked) state.selected.add(cb.value); else state.selected.delete(cb.value);
-      if (!state.selected.size) { state.all = true; $('#picker-all').checked = true; buildPicker(); }
       updatePickerLabel();
     };
   });
@@ -1076,6 +1116,7 @@ async function boot() {
   state.selected = new Set(Array.isArray(prefs.selected) ? prefs.selected : []);
   state.start = prefs.start || null;
   state.end = prefs.end || null;
+  state.campaignSearch = typeof prefs.campaignSearch === 'string' ? prefs.campaignSearch : '';
   state.targetKind = prefs.targetKind || 'positive';
   state.targetSearch = prefs.targetSearch || '';
   state.termSearch = prefs.termSearch || '';
