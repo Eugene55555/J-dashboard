@@ -108,16 +108,19 @@
         <option value="ARCHIVED">ARCHIVED</option>
       </select>
       <div class="picker" id="picker">
-        <button class="picker-btn" id="picker-btn">
+        <button class="picker-btn" id="picker-btn" aria-expanded="false" aria-controls="picker-panel">
           <span id="picker-label">Все кампании</span>
           <span class="chev">▾</span>
         </button>
-        <div class="picker-panel" id="picker-panel">
-          <input class="picker-search" id="picker-search" placeholder="Поиск кампании…">
+        <div class="picker-panel" id="picker-panel" role="dialog" aria-label="Выбор кампаний">
+          <input class="picker-search" id="picker-search" type="search" placeholder="Поиск кампании по названию или ID…">
+          <div class="picker-count" id="picker-count"></div>
           <label class="picker-all"><input type="checkbox" id="picker-all" checked> Все кампании</label>
           <div id="picker-list"></div>
+          <div class="picker-empty hidden" id="picker-empty">Ничего не найдено — измените запрос</div>
           <div class="picker-foot">
-            <button class="link-btn" id="picker-clear">Сбросить</button>
+            <button class="link-btn" id="picker-found">Выбрать найденные</button>
+            <button class="link-btn" id="picker-clear">Сбросить (все кампании)</button>
             <button class="link-btn" id="picker-apply">Применить</button>
           </div>
         </div>

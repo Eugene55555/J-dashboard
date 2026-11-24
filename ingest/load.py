@@ -324,6 +324,16 @@ def load_settings(
     group_bids: dict[str, float] = {}
     if kind == "adgroups":
         group_bids = {_text(r.get("adGroupId")): _num(r.get("defaultBid")) for r in rows}
+    elif kind in ("targets", "keywords", "negative_targets", "negative_keywords",
+                  "campaign_negative_targets", "campaign_negative_keywords"):
+        # Ставка объекта часто не задана и наследуется от группы. Раньше здесь
+        # смотрели только на загружаемый файл групп, поэтому ключи из отдельной
+        # выгрузки получали bid_source=UNKNOWN и «ставка не задана» в интерфейсе.
+        group_bids = {
+            _text(r["ad_group_id"]): r["default_bid"]
+            for r in conn.execute("SELECT ad_group_id, default_bid FROM dim_adgroup")
+            if r["default_bid"] is not None
+        }
 
     materialized: list[dict[str, Any]] = []
     for row in rows:
@@ -508,6 +518,50 @@ def _columns(conn: sqlite3.Connection, table: str) -> list[str]:
     return [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
 
 
+AUTO_LABELS = {
+    "QUERY_HIGH_REL_MATCHES": "авто · близкие запросы",
+    "QUERY_BROAD_REL_MATCHES": "авто · широкие запросы",
+    "ASIN_SUBSTITUTE_RELATED": "авто · замена",
+    "ASIN_ACCESSORY_RELATED": "авто · дополнение",
+    "ASIN_SAME_AS": "авто · тот же товар",
+    "CLOSE-MATCH": "авто · близкие запросы",
+    "LOOSE-MATCH": "авто · широкие запросы",
+    "SUBSTITUTES": "авто · замена",
+    "COMPLEMENTS": "авто · дополнение",
+}
+
+MATCH_LABELS = {
+    "KEYWORD_BROAD": "широкое", "KEYWORD_PHRASE": "фраза", "KEYWORD_EXACT": "точное",
+    "NEGATIVE_KEYWORD_BROAD": "минус-широкое", "NEGATIVE_KEYWORD_PHRASE": "минус-фраза",
+    "NEGATIVE_KEYWORD_EXACT": "минус-точное",
+}
+
+
+def _history_label(entity_type: str, entity_id: str, meta: dict[str, Any]) -> str:
+    """Название объекта для журнала.
+
+    Amazon отдаёт в metadata сам текст ключа или выражение таргета; подставлять
+    вместо него ID кампании нельзя — в журнале получится «объект без имени».
+    """
+    keyword = _text(meta.get("keyword"))
+    match = MATCH_LABELS.get(_text(meta.get("keywordType")) or _text(meta.get("negativeTargetingType")), "")
+    if keyword:
+        return f"{keyword} · {match}" if match else keyword
+    predefined = _text(meta.get("predefinedTarget"))
+    if predefined:
+        return AUTO_LABELS.get(predefined, predefined)
+    expression = _text(meta.get("targetingExpression"))
+    if expression:
+        # Авто-таргеты в выражении выглядят как ASIN_SAME_AS:B0… — переводим тип.
+        head, _, tail = expression.partition(":")
+        if head in AUTO_LABELS:
+            return AUTO_LABELS[head] + (f" · {tail}" if tail else "")
+        return expression
+    if entity_type == "AD_GROUP" and meta.get("adGroupId"):
+        return _text(meta.get("adGroupId"))
+    return entity_id
+
+
 def import_changes(conn: sqlite3.Connection, rows: Iterable[dict[str, Any]]) -> int:
     """Импорт готового журнала: наш x_changes или события POST /history Amazon."""
     count = 0
@@ -554,7 +608,7 @@ def import_changes(conn: sqlite3.Connection, rows: Iterable[dict[str, Any]]) -> 
                 entity_id=entity_id,
                 campaign_id=campaign_id,
                 ad_group_id=ad_group_id,
-                label=campaign_id,
+                label=_history_label(entity_type, entity_id, meta),
                 field=field,
                 old=old,
                 new=new,

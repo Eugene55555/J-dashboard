@@ -147,6 +147,19 @@ class SettingsTests(Base):
         self.assertIsNone(target["bid"])
         self.assertEqual(target["negative_level"], "AD_GROUP")
 
+    def test_keyword_without_own_bid_inherits_group_default_from_db(self):
+        # Снимок групп лежит в базе с прошлой загрузки, а ключи приходят отдельным файлом.
+        load_settings(self.conn, "adgroups", [{"adGroupId": "2", "campaignId": "1", "name": "G",
+                                              "state": "ENABLED", "defaultBid": 0.6}],
+                      "2026-11-20T12:00:00+00:00", emit_creates=False)
+        load_settings(self.conn, "keywords", [{"keywordId": "k1", "adGroupId": "2", "campaignId": "1",
+                                              "keywordText": "крем", "matchType": "EXACT", "state": "ENABLED"}],
+                      "2026-11-20T12:00:00+00:00", emit_creates=False)
+        row = self.conn.execute("SELECT * FROM dim_target WHERE target_id='k1'").fetchone()
+        self.assertIsNone(row["bid"])
+        self.assertEqual(row["bid_source"], "AD_GROUP_DEFAULT")
+        self.assertAlmostEqual(row["effective_bid"], 0.6)
+
     def test_history_events_import(self):
         events = [{
             "entityType": "CAMPAIGN", "entityId": "1", "changeType": "BUDGET_AMOUNT",

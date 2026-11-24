@@ -118,6 +118,9 @@ def write_ui(out_dir: Path, *, encrypted: bool) -> None:
 def build(account_id: str, out_dir: Path, password: str = "", login: str = "eugene") -> dict:
     if not password and out_dir.resolve().is_relative_to((ROOT / 'docs').resolve()):
         raise SystemExit('В каталоге публикации и его подпапках разрешены только --ui-only или сборка с паролем')
+    # Сборка вне опубликованного каталога (локальная проверка) пишет data.json
+    # первой, до write_ui, поэтому каталог создаём сразу.
+    out_dir.mkdir(parents=True, exist_ok=True)
     accounts = settings.accounts()
     if account_id not in accounts:
         raise SystemExit(f"нет кабинета {account_id}; есть: {', '.join(accounts)}")
@@ -128,10 +131,10 @@ def build(account_id: str, out_dir: Path, password: str = "", login: str = "euge
         SELECT campaign_id, name, state, targeting_type, budget, budget_type, bid_strategy,
                adj_top, adj_product_page, adj_rest, start_date, end_date, serving_status, updated_at
         FROM dim_campaign ORDER BY name""")
-    adgroups = rows(conn, "SELECT ad_group_id, campaign_id, name FROM dim_adgroup")
+    adgroups = rows(conn, "SELECT ad_group_id, campaign_id, name, default_bid FROM dim_adgroup")
     targets = rows(conn, """
-        SELECT target_id, campaign_id, ad_group_id, targeting, match_type, is_negative,
-               negative_level, state, bid, effective_bid, serving_status, updated_at
+        SELECT target_id, campaign_id, ad_group_id, kind, targeting, match_type, is_negative,
+               negative_level, state, bid, effective_bid, serving_status, created_at, updated_at
         FROM dim_target""")
 
     facts = {}
@@ -157,9 +160,10 @@ def build(account_id: str, out_dir: Path, password: str = "", login: str = "euge
         SELECT ch.change_date, ch.change_ts, ch.date_precision, ch.entity_type, ch.entity_id,
                ch.campaign_id, ch.ad_group_id,
                COALESCE(NULLIF(ch.entity_label, ''), c.name, ch.entity_id) AS entity_label,
+               COALESCE(NULLIF(c.name, ''), ch.campaign_id) AS campaign_name,
                ch.field, ch.old_value, ch.new_value, ch.delta, ch.source, ch.actor, ch.summary
         FROM changes ch LEFT JOIN dim_campaign c ON c.campaign_id = ch.campaign_id
-        ORDER BY ch.change_ts DESC, ch.change_date DESC LIMIT 5000""")
+        ORDER BY ch.change_date DESC, ch.change_ts DESC""")
     coverage = rows(conn, "SELECT dataset, date, rows, spend, status FROM coverage ORDER BY date DESC")
     runs = rows(conn, """SELECT run_id, started_at, finished_at, status, files, rows, source
                          FROM sync_runs ORDER BY started_at DESC LIMIT 20""")

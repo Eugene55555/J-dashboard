@@ -15,6 +15,9 @@ const state = {
   pages: {},
   chart: 'money',
   token: 0,
+  targetIdle: false,
+  changeGroup: '',
+  changeEntity: '',
 };
 
 const STORE_KEY = 'jd_state';
@@ -30,8 +33,10 @@ function savePrefs() {
       status: state.status, all: state.all, selected: [...state.selected],
       campaignSearch: state.campaignSearch || '',
       targetKind: state.targetKind || 'positive', targetSearch: state.targetSearch || '',
+      targetIdle: !!state.targetIdle,
       termSearch: state.termSearch || '', termOrders: !!state.termOrders,
-      changeSearch: state.changeSearch || '', chart: state.chart || 'money',
+      changeSearch: state.changeSearch || '', changeGroup: state.changeGroup || '',
+      changeEntity: state.changeEntity || '', chart: state.chart || 'money',
       sort: state.sort || {},
       filtersOpen: state.filtersOpen,
     }));
@@ -517,6 +522,40 @@ function acosCell(row) {
   return `<span class="${cls}">${fmtPct(row.acos, 1)}</span>`;
 }
 
+/* Названия полей и типов объектов — одни для журнала и вкладки «Ключи и цели». */
+const FIELD_LABELS = {
+  STATUS: 'статус', BID_AMOUNT: 'ставка', DEFAULT_BID_AMOUNT: 'ставка группы',
+  BUDGET_AMOUNT: 'бюджет', IN_BUDGET: 'в бюджете', NAME: 'название', CREATED: 'создание',
+  SMART_BIDDING_STRATEGY: 'стратегия', START_DATE: 'дата старта', END_DATE: 'дата конца',
+  PLACEMENT_TOP: 'надбавка · Top of Search', PLACEMENT_DETAIL_PAGE: 'надбавка · Product page',
+  PLACEMENT_REST_OF_SEARCH: 'надбавка · Rest of Search',
+  PLACEMENT_PRODUCT_PAGE: 'надбавка · Product page',
+};
+const TYPE_LABELS = {
+  CAMPAIGN: 'кампания', AD_GROUP: 'группа', AD: 'объявление', KEYWORD: 'ключ',
+  PRODUCT_TARGETING: 'таргет', TARGET: 'таргет', NEGATIVE_KEYWORD: 'минус-ключ',
+  NEGATIVE_TARGET: 'минус-таргет', CAMPAIGN_NEGATIVE_KEYWORD: 'минус-ключ кампании',
+  CAMPAIGN_NEGATIVE_TARGET: 'минус-таргет кампании', BULK: 'пакет изменений',
+};
+const MATCH_LABELS = {
+  EXACT: 'точное', BROAD: 'широкое', PHRASE: 'фраза', AUTO: 'авто',
+  AUTO_CLOSE: 'авто · близкие', AUTO_LOOSE: 'авто · широкие',
+  AUTO_SUBSTITUTES: 'авто · замена', AUTO_COMPLEMENTS: 'авто · дополнение',
+};
+const matchLabel = (value) => MATCH_LABELS[value] || value || '—';
+const fieldLabel = (field) => FIELD_LABELS[field] || (field || '').replace(/_/g, ' ').toLowerCase();
+const typeLabel = (type) => TYPE_LABELS[type] || type || '—';
+
+function targetEventCell(r) {
+  if (!r.last_field) {
+    return '<span style="color:var(--dim)" title="в журнале нет событий по этому объекту">—</span>';
+  }
+  const when = (r.last_date || '').slice(5).split('-').reverse().join('.');
+  const values = `${esc(r.last_old || '—')} → ${esc(r.last_new || '—')}`;
+  return `<div class="mono" title="${esc(fieldLabel(r.last_field))}: ${esc(r.last_old || '—')} → ${esc(r.last_new || '—')} (${esc(r.last_ts || '')}${r.last_precision === 'EXACT_TS' ? ' UTC' : ', снимок'})">
+    <b>${when}</b> · ${esc(fieldLabel(r.last_field))}: ${values}</div>`;
+}
+
 /* ---------- views ---------- */
 const views = {};
 
@@ -644,8 +683,10 @@ views.targets = async () => {
   const p = query();
   p.set('kind', kind);
   if (state.targetSearch) p.set('q', state.targetSearch);
+  if (state.targetIdle) p.set('idle', 'true');
   const rows = await api('/api/targets?' + p);
   const maxSpend = Math.max(...rows.map((r) => r.spend || 0), 1);
+  const idleCount = rows.filter((r) => r.idle).length;
 
   return `
     <div class="card" style="margin-top:16px">
@@ -655,12 +696,14 @@ views.targets = async () => {
           <button data-kind="negative" class="${kind === 'negative' ? 'active' : ''}">Негативы</button>
           <button data-kind="all" class="${kind === 'all' ? 'active' : ''}">Все</button>
         </div>
-        <input class="search" id="tgt-search" placeholder="Таргет, ключ, тип совпадения…" value="${esc(state.targetSearch || '')}">
-        <span class="pill">${rows.length} объектов</span>
+        <input class="search" id="tgt-search" placeholder="Таргет, ключ, тип совпадения..." value="${esc(state.targetSearch || '')}">
+        <label class="check"><input type="checkbox" id="tgt-idle" ${state.targetIdle ? 'checked' : ''}> только без показов</label>
+        <span class="pill">${fmtInt(rows.length)} ${plural(rows.length, ['объект', 'объекта', 'объектов'])}</span>
+        <span class="pill">без показов ${fmtInt(idleCount)}</span>
       </div>
       <div id="tgt-table">${tableHtml('targets', [
-        { key: 'targeting', label: 'Таргет / ключ', left: true, render: (r) => `<div style="max-width:300px"><div style="overflow:hidden;text-overflow:ellipsis">${esc(r.targeting || '—')}</div><span class="tag${r.is_negative ? ' neg' : ''}">${esc(r.match_type || r.kind || '—')}</span></div>` },
-        { key: 'campaign_name', label: 'Кампания', left: true, render: (r) => `<span style="color:var(--muted);display:inline-block;max-width:190px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom">${esc(r.campaign_name || r.campaign_id)}</span>` },
+        { key: 'targeting', label: 'Таргет / ключ', left: true, render: (r) => `<div style="max-width:300px"><div style="overflow:hidden;text-overflow:ellipsis" title="${esc(r.targeting_raw || r.targeting || '')}">${esc(r.targeting || '—')}</div><span class="tag${r.is_negative ? ' neg' : ''}">${esc(matchLabel(r.match_type) !== '—' ? matchLabel(r.match_type) : (r.kind || '—'))}</span></div>` },
+        { key: 'campaign_name', label: 'Кампания', left: true, render: (r) => `<span style="color:var(--muted);display:inline-block;max-width:190px;overflow:hidden;text-overflow:ellipsis;vertical-align:bottom" title="${esc(r.campaign_name || r.campaign_id)}">${esc(r.campaign_name || r.campaign_id)}</span>` },
         { key: 'state', label: 'Статус', left: true, render: (r) => `<span class="dot ${esc(r.state)}" style="display:inline-block;margin-right:5px"></span>${esc(r.state)}` },
         { key: 'bid', label: 'Ставка', render: (r) => {
             if (r.is_negative) return '<span style="color:var(--dim)">—</span>';
@@ -668,6 +711,8 @@ views.targets = async () => {
             if (r.effective_bid !== null && r.effective_bid !== undefined) return `<span style="color:var(--dim)">гр. $${fmtNum(r.effective_bid, 3)}</span>`;
             return '<span style="color:var(--dim)">не задана</span>';
           } },
+        { key: 'created_at', label: 'Добавлен', left: true, render: (r) => `<span class="mono" title="${esc(r.created_at ? 'создан ' + r.created_at : 'дата создания не пришла от Amazon')}">${esc((r.created_at || '').slice(0, 10) || '—')}</span>` },
+        { key: 'last_date', label: 'Последнее изменение', left: true, render: (r) => targetEventCell(r) },
         { key: 'impressions', label: 'Показы', render: (r) => fmtInt(r.impressions) },
         { key: 'clicks', label: 'Клики', render: (r) => fmtInt(r.clicks) },
         { key: 'spend', label: 'Расход', render: (r) => barCell(r.spend, maxSpend, '$' + fmtMoney(r.spend)) },
@@ -675,7 +720,12 @@ views.targets = async () => {
         { key: 'sales', label: 'Продажи', render: (r) => '$' + fmtMoney(r.sales) },
         { key: 'acos', label: 'ACOS', render: acosCell },
       ], rows, { defaultSort: 'spend' })}</div>
-      ${kind === 'negative' ? `<div class="card-body" style="padding-top:0"><div class="card-sub">Негативы не показывают рекламу, поэтому метрик у них нет. Ставка для негатива не применяется; колонка «Эффект.» пустая.</div></div>` : ''}
+      <div class="card-body" style="padding-top:0"><div class="card-sub">
+        ${kind === 'negative' ? 'Негативы не показывают рекламу, поэтому метрик у них нет, а ставка не применяется.<br>' : ''}
+        «Добавлен» — дата создания объекта из снимка настроек Amazon; «Последнее изменение» — самое свежее
+        событие журнала (пауза, ставка, статус) с датой. Объекты без показов за период не скрываются:
+        прочерки в метриках означают «реклама не показывалась», а не «данных нет».
+      </div></div>
     </div>`;
 };
 
@@ -773,6 +823,8 @@ views.products = async () => {
 views.changes = async () => {
   const p = query();
   if (state.changeSearch) p.set('q', state.changeSearch);
+  if (state.changeGroup) p.set('group', state.changeGroup);
+  if (state.changeEntity) p.set('entity', state.changeEntity);
   const rows = await api('/api/changes?' + p);
   const srcLabel = {
     AMAZON_HISTORY: 'Amazon', SNAPSHOT_DIFF: 'снимок', AGENT_WRITE: 'агент', IMPORT: 'импорт',
@@ -790,25 +842,38 @@ views.changes = async () => {
       <div class="timeline">${items.map((r) => `
         <div class="chg">
           <div class="when"><b>${esc((r.change_ts || '').slice(11, 19) || '—')}</b>${r.date_precision === 'EXACT_TS' ? 'UTC' : 'снимок'}</div>
-          <div><span class="tag">${esc(r.entity_type || '—')}</span></div>
+          <div><span class="tag">${esc(typeLabel(r.entity_type))}</span></div>
           <div class="what">
             <span class="obj">${esc(r.entity_label || r.entity_id || '—')}</span>
-            <span style="color:var(--dim)"> · </span><span>${esc(r.field)}</span>
+            <span style="color:var(--dim)"> · </span><span>${esc(fieldLabel(r.field))}</span>
+            <div class="mono">кампания: ${esc(r.campaign_name || r.campaign_id || '—')}${(r.ad_group_name || r.ad_group_id) ? ' · группа ' + esc(r.ad_group_name || r.ad_group_id) : ''}</div>
             <div class="vals"><span class="old">${esc(r.old_value || '—')}</span><span class="arr">→</span><span class="new">${esc(r.new_value || '—')}</span></div>
           </div>
           <div class="src">${esc(srcLabel[r.source] || r.source || '')}${r.actor && r.actor !== 'UNKNOWN' ? ' · ' + esc(r.actor) : ''}</div>
         </div>`).join('')}</div>
     </div>`).join('');
 
+  const groupOptions = [['', 'Что менялось: всё'], ['status', 'статусы'], ['bid', 'ставки'],
+    ['budget', 'бюджеты'], ['placement', 'надбавки размещений'], ['name', 'названия'], ['created', 'создание объектов']];
+  const entityOptions = [['', 'Объекты: все'], ['CAMPAIGN', 'кампании'], ['AD_GROUP', 'группы'],
+    ['KEYWORD', 'ключи'], ['PRODUCT_TARGETING', 'таргеты'], ['NEGATIVE_KEYWORD', 'минус-ключи']];
+
   return `
     <div class="card" style="margin-top:16px">
       <div class="table-tools">
         <input class="search" id="chg-search" placeholder="Поиск: поле, объект, кампания…" value="${esc(state.changeSearch || '')}">
-        <span class="pill">${rows.length} событий</span>
+        <select class="select" id="chg-group" aria-label="Что менялось">
+          ${groupOptions.map(([v, l]) => `<option value="${v}" ${state.changeGroup === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+        </select>
+        <select class="select" id="chg-entity" aria-label="Тип объекта">
+          ${entityOptions.map(([v, l]) => `<option value="${v}" ${state.changeEntity === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}
+        </select>
+        <span class="pill">${fmtInt(rows.length)} ${plural(rows.length, ['событие', 'события', 'событий'])}</span>
       </div>
       <div class="card-body">
         ${rows.length ? html : `<div class="empty"><b>За выбранный период изменений нет</b>
           Журнал пополняется при каждой синхронизации: история Amazon (90 дней) и сравнение снимков настроек.<br>
+          ${state.changeGroup || state.changeEntity ? 'Сейчас включён фильтр: ' + esc([groupOptions.find(([v]) => v === state.changeGroup)?.[1], entityOptions.find(([v]) => v === state.changeEntity)?.[1]].filter(Boolean).join(' · ')) + '.<br>' : ''}
           ${state.preset === 'all' ? '' : 'Возможно, события есть за более широкий период.'}
           ${state.preset === 'all' ? 'Если период шире истории Amazon — записей за старые дни не будет.' : '<div style="margin-top:12px"><button class="btn" id="chg-all">Показать за все время</button></div>'}</div>`}
       </div>
@@ -967,6 +1032,8 @@ function afterRender() {
       b.onclick = () => { state.targetKind = b.dataset.kind; savePrefs(); render(); };
     });
     bindSearch('#tgt-search', 'targetSearch');
+    const idle = $('#tgt-idle');
+    if (idle) idle.onchange = (e) => { state.targetIdle = e.target.checked; state.pages = {}; savePrefs(); render(); };
     bindSorts($('#view'), render);
   }
 
@@ -980,6 +1047,10 @@ function afterRender() {
     const all = $('#chg-all');
     if (all) all.onclick = () => { setPeriod('all'); render(); };
     bindSearch('#chg-search', 'changeSearch');
+    const group = $('#chg-group');
+    if (group) group.onchange = () => { state.changeGroup = group.value; savePrefs(); render(); };
+    const entity = $('#chg-entity');
+    if (entity) entity.onchange = () => { state.changeEntity = entity.value; savePrefs(); render(); };
   }
 
   if (['products', 'placements', 'data'].includes(state.view)) bindSorts($('#view'), render);
@@ -1017,19 +1088,43 @@ async function loadMeta() {
 function buildPicker() {
   const list = $('#picker-list');
   const camps = state.meta.campaigns;
-  list.innerHTML = camps.map((c) => `
-    <label class="picker-item">
-      <input type="checkbox" value="${esc(c.campaign_id)}" ${state.all || state.selected.has(c.campaign_id) ? 'checked' : ''} ${state.all ? 'disabled' : ''}>
-      <div><div class="nm">${esc(c.name || c.campaign_id)}</div><div class="id">${esc(c.campaign_id)} · ${esc(c.state)} · $${fmtMoney0(c.budget)}</div></div>
-    </label>`).join('');
+  list.innerHTML = camps.map((c) => {
+    const name = c.name || c.campaign_id;
+    return `
+    <div class="picker-item" data-search="${esc(`${name}\u0000${c.campaign_id}\u0000${c.state || ''}`.toLowerCase())}">
+      <label class="picker-pick"><input type="checkbox" value="${esc(c.campaign_id)}" ${state.all || state.selected.has(c.campaign_id) ? 'checked' : ''} ${state.all ? 'disabled' : ''}>
+      <span class="nm" title="${esc(name)}">${esc(name)}</span>
+      <span class="id">${esc(c.state || '')}</span></label>
+      <button type="button" class="link-btn picker-only" value="${esc(c.campaign_id)}" aria-label="Показать только ${esc(name)}">Только эта</button>
+    </div>`;
+  }).join('');
+  list.onclick = (e) => {
+    const only = e.target.closest('.picker-only');
+    if (!only) return;
+    state.all = false;
+    state.selected = new Set([only.value]);
+    buildPicker();
+    closePicker();
+    savePrefs();
+    render();
+  };
   $$('#picker-list input').forEach((cb) => {
     cb.onchange = () => {
       if (cb.checked) state.selected.add(cb.value); else state.selected.delete(cb.value);
+      state.pages = {};
       updatePickerLabel();
     };
   });
   $('#picker-all').checked = state.all;
+  applyPickerSearch($('#picker-search').value || '');
   updatePickerLabel();
+}
+
+function closePicker() {
+  const panel = $('#picker-panel');
+  panel.classList.remove('open');
+  $('#picker-btn').setAttribute('aria-expanded', 'false');
+  $('#picker-btn').focus();
 }
 
 function updatePickerLabel() {
@@ -1037,6 +1132,30 @@ function updatePickerLabel() {
   $('#picker-label').textContent = state.all ? 'Все кампании'
     : (state.selected.size === 1 ? (state.meta.campaigns.find((c) => c.campaign_id === [...state.selected][0])?.name || '1 кампания')
       : `${state.selected.size} из ${total}`);
+  const count = $('#picker-count');
+  if (count) count.textContent = state.all
+    ? `Все кампании (${fmtInt(total)})`
+    : `Выбрано ${fmtInt(state.selected.size)} из ${fmtInt(total)}`;
+}
+
+/* Видимые строки списка — те, что прошли поиск: по ним работает «Выбрать найденные». */
+function pickerVisible() {
+  return $$('#picker-list .picker-item').filter((el) => el.style.display !== 'none');
+}
+
+function applyPickerSearch(query) {
+  const q = (query || '').trim().toLowerCase();
+  let visible = 0;
+  $$('#picker-list .picker-item').forEach((el) => {
+    const hit = !q || (el.dataset.search || '').includes(q);
+    el.style.display = hit ? '' : 'none';
+    if (hit) visible += 1;
+  });
+  const empty = $('#picker-empty');
+  if (empty) empty.classList.toggle('hidden', visible > 0);
+  const found = $('#picker-found');
+  if (found) found.disabled = visible === 0;
+  return visible;
 }
 
 /* ---------- bindings ---------- */
@@ -1071,21 +1190,44 @@ function bindChrome() {
   }
 
   const panel = $('#picker-panel');
-  $('#picker-btn').onclick = (e) => { e.stopPropagation(); panel.classList.toggle('open'); };
+  $('#picker-btn').onclick = (e) => {
+    e.stopPropagation();
+    const open = panel.classList.toggle('open');
+    $('#picker-btn').setAttribute('aria-expanded', String(open));
+    if (open) $('#picker-search').focus();
+  };
   panel.onclick = (e) => e.stopPropagation();
   document.addEventListener('click', () => panel.classList.remove('open'));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && panel.classList.contains('open')) closePicker();
+  });
   $('#picker-all').onchange = (e) => {
     state.all = e.target.checked;
     if (state.all) state.selected.clear();
     buildPicker();
     savePrefs();
   };
-  $('#picker-clear').onclick = () => { state.all = true; state.selected.clear(); buildPicker(); savePrefs(); render(); };
-  $('#picker-apply').onclick = () => { panel.classList.remove('open'); savePrefs(); render(); };
-  $('#picker-search').oninput = (e) => {
-    const q = e.target.value.toLowerCase();
-    $$('#picker-list .picker-item').forEach((el) => { el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none'; });
+  $('#picker-found').onclick = () => {
+    const ids = pickerVisible().map((el) => el.querySelector('input')?.value).filter(Boolean);
+    if (!ids.length) return;
+    state.all = false;
+    state.selected = new Set(ids);
+    state.pages = {};
+    buildPicker();
+    $('#picker-all').checked = false;
+    savePrefs();
   };
+  $('#picker-clear').onclick = () => {
+    state.all = true;
+    state.selected.clear();
+    state.pages = {};
+    $('#picker-all').checked = true;
+    buildPicker();
+    savePrefs();
+    render();
+  };
+  $('#picker-apply').onclick = () => { closePicker(); savePrefs(); render(); };
+  $('#picker-search').oninput = (e) => applyPickerSearch(e.target.value);
   window.matchMedia('(max-width: 820px)').addEventListener('change', () => {
     applyFiltersVisibility();
     render();
@@ -1119,9 +1261,12 @@ async function boot() {
   state.campaignSearch = typeof prefs.campaignSearch === 'string' ? prefs.campaignSearch : '';
   state.targetKind = prefs.targetKind || 'positive';
   state.targetSearch = prefs.targetSearch || '';
+  state.targetIdle = !!prefs.targetIdle;
   state.termSearch = prefs.termSearch || '';
   state.termOrders = !!prefs.termOrders;
   state.changeSearch = prefs.changeSearch || '';
+  state.changeGroup = prefs.changeGroup || '';
+  state.changeEntity = prefs.changeEntity || '';
   state.chart = prefs.chart || 'money';
   state.sort = prefs.sort && typeof prefs.sort === 'object' ? prefs.sort : {};
   state.filtersOpen = typeof prefs.filtersOpen === 'boolean'

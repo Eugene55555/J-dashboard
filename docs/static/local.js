@@ -246,12 +246,35 @@ window.LocalAPI = (() => {
       .sort((a, b) => (b.spend || 0) - (a.spend || 0));
   }
 
+  // Коды авто-таргетов переводим так же, как сервер (app/queries.py).
+  const AUTO_TARGET_LABELS = {
+    'QUERY_HIGH_REL_MATCHES': 'авто · близкие запросы',
+    'QUERY_BROAD_REL_MATCHES': 'авто · широкие запросы',
+    'ASIN_SUBSTITUTE_RELATED': 'авто · замена',
+    'ASIN_ACCESSORY_RELATED': 'авто · дополнение',
+    'ASIN_SAME_AS': 'авто · тот же товар',
+    'CLOSE-MATCH': 'авто · близкие запросы', 'LOOSE-MATCH': 'авто · широкие запросы',
+    SUBSTITUTES: 'авто · замена', COMPLEMENTS: 'авто · дополнение',
+  };
+  function targetingLabel(value) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    const cut = text.indexOf(':');
+    const head = (cut < 0 ? text : text.slice(0, cut)).trim().toUpperCase();
+    const label = AUTO_TARGET_LABELS[head];
+    if (!label) return text;
+    const tail = cut < 0 ? '' : text.slice(cut + 1);
+    return tail ? `${label} · ${tail}` : label;
+  }
+
   function targetsView(params) {
     const { start, end } = windowOf(params, 30);
     const picked = pickedCampaigns(params);
     const kind = params.get('kind') || 'positive';
     const q = (params.get('q') || '').toLowerCase();
+    const onlyIdle = params.get('idle') === 'true';
     const groups = adGroupMap();
+    const events = lastEventMap();
 
     const totals = new Map();
     DATA.facts.target_day.forEach((r) => {
@@ -271,14 +294,44 @@ window.LocalAPI = (() => {
         const metrics = list.length ? sum(list, (r) => ({ impressions: r[4], clicks: r[5], spend: r[6], orders: r[7], sales: r[8], units: r[9] })) : empty;
         const meta = campaignMap().get(t.campaign_id) || {};
         const group = groups.get(t.ad_group_id) || {};
+        // Ставка без собственного значения наследуется от группы — как в кабинете Amazon.
+        const inherited = !t.is_negative && t.bid == null && t.effective_bid == null
+          && group.default_bid != null ? group.default_bid : null;
         return ratios({
           ...t,
+          targeting_raw: t.targeting,
+          targeting: targetingLabel(t.targeting),
+          effective_bid: t.effective_bid != null ? t.effective_bid : (inherited != null ? inherited : null),
+          bid_source: t.bid_source || (inherited != null ? 'AD_GROUP_DEFAULT' : t.bid_source),
           campaign_name: meta.name || t.campaign_id,
           ad_group_name: group.name || '',
+          idle: metrics.impressions ? 0 : 1,
+          ...(events.get(t.target_id) || { last_field: null, last_old: null, last_new: null,
+            last_date: null, last_ts: null, last_precision: null, last_source: null }),
           ...metrics,
         });
       })
+      .filter((t) => !onlyIdle || t.idle)
       .sort((a, b) => (a.is_negative - b.is_negative) || (b.spend - a.spend) || String(a.targeting).localeCompare(String(b.targeting)));
+  }
+
+  /* Самое свежее событие журнала по каждому объекту — для колонки «Последнее изменение». */
+  let eventIndex = null;
+  function lastEventMap() {
+    if (eventIndex) return eventIndex;
+    eventIndex = new Map();
+    DATA.changes.forEach((c) => {
+      const ts = String(c.change_ts || c.change_date || '');
+      const known = eventIndex.get(c.entity_id);
+      if (!known || ts > known.last_ts) {
+        eventIndex.set(c.entity_id, {
+          last_field: c.field || null, last_old: c.old_value ?? null, last_new: c.new_value ?? null,
+          last_date: c.change_date || null, last_ts: c.change_ts || null,
+          last_precision: c.date_precision || null, last_source: c.source || null,
+        });
+      }
+    });
+    return eventIndex;
   }
 
   function termsView(params) {
@@ -303,7 +356,7 @@ window.LocalAPI = (() => {
         targeting: first[5], match_type: first[6],
         ...sum(list, (r) => ({ impressions: r[7], clicks: r[8], spend: r[9], orders: r[10], sales: r[11], units: r[12] })),
       });
-    }).filter((r) => !ordersOnly || r.orders > 0).sort((a, b) => b.spend - a.spend).slice(0, 500);
+    }).filter((r) => !ordersOnly || r.orders > 0).sort((a, b) => b.spend - a.spend);
   }
 
   const PLACEMENT_LABELS = {
@@ -384,16 +437,37 @@ window.LocalAPI = (() => {
     }).sort((a, b) => b.spend - a.spend);
   }
 
+  // Те же группы полей, что и на сервере (app/queries.py): фильтры обязаны совпадать.
+  const FIELD_GROUPS = {
+    status: ['STATUS'],
+    bid: ['BID_AMOUNT', 'DEFAULT_BID_AMOUNT', 'BID'],
+    budget: ['BUDGET_AMOUNT', 'IN_BUDGET'],
+    placement: ['PLACEMENT_TOP', 'PLACEMENT_DETAIL_PAGE', 'PLACEMENT_REST_OF_SEARCH',
+      'PLACEMENT_PRODUCT_PAGE'],
+    name: ['NAME'],
+    created: ['CREATED'],
+  };
+
   function changesView(params) {
     const { start, end } = windowOf(params, 90);
     const picked = pickedCampaigns(params);
     const q = (params.get('q') || '').toLowerCase();
+    const group = FIELD_GROUPS[params.get('group') || ''] || null;
+    const entity = (params.get('entity') || '').trim();
     return DATA.changes
       .filter((c) => inWindow(c.change_date, start, end))
       .filter((c) => !picked || picked.has(c.campaign_id))
-      .filter((c) => !q || [c.summary, c.field, c.entity_label].join(' ').toLowerCase().includes(q))
-      .sort((a, b) => String(b.change_ts || b.change_date).localeCompare(String(a.change_ts || a.change_date)))
-      .slice(0, 2000);
+      .filter((c) => !group || group.includes(c.field))
+      .filter((c) => !entity || c.entity_type === entity)
+      .filter((c) => !q || [c.summary, c.field, c.entity_label, c.campaign_name, c.campaign_id]
+        .join(' ').toLowerCase().includes(q))
+      .map((c) => {
+        const group = adGroupMap().get(c.ad_group_id) || {};
+        return { ...c,
+          campaign_name: c.campaign_name || (campaignMap().get(c.campaign_id) || {}).name || c.campaign_id,
+          ad_group_name: c.ad_group_name || group.name || '' };
+      })
+      .sort((a, b) => String(b.change_ts || b.change_date).localeCompare(String(a.change_ts || a.change_date)));
   }
 
   function meta() {

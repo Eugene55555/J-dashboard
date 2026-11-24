@@ -31,6 +31,33 @@ def placement_label(raw: str | None) -> str:
     return PLACEMENT_LABELS.get(value.upper(), value.replace(" ON-AMAZON", "").replace(" OFF-AMAZON", "").title())
 
 
+# Авто-таргеты Amazon приходят кодами (QUERY_HIGH_REL_MATCHES, ASIN_SAME_AS:B0…).
+# Владельцу нужен смысл, а не код; исходное значение остаётся в подсказке.
+AUTO_TARGET_LABELS = {
+    "QUERY_HIGH_REL_MATCHES": "авто · близкие запросы",
+    "QUERY_BROAD_REL_MATCHES": "авто · широкие запросы",
+    "ASIN_SUBSTITUTE_RELATED": "авто · замена",
+    "ASIN_ACCESSORY_RELATED": "авто · дополнение",
+    "ASIN_SAME_AS": "авто · тот же товар",
+    "CLOSE-MATCH": "авто · близкие запросы",
+    "LOOSE-MATCH": "авто · широкие запросы",
+    "SUBSTITUTES": "авто · замена",
+    "COMPLEMENTS": "авто · дополнение",
+}
+
+
+def targeting_label(value: str | None) -> str:
+    """Читаемое название таргета: код авто-таргета переводим, ключ оставляем как есть."""
+    text = (value or "").strip()
+    if not text:
+        return ""
+    head, _, tail = text.partition(":")
+    label = AUTO_TARGET_LABELS.get(head.strip().upper())
+    if not label:
+        return text
+    return f"{label} · {tail}" if tail else label
+
+
 def _camp_filter(campaigns: list[str] | None, column: str = "campaign_id") -> tuple[str, list[str]]:
     if not campaigns:
         return "", []
@@ -150,7 +177,12 @@ def campaigns(conn: sqlite3.Connection, start: str, end: str,
 
 def targets(conn: sqlite3.Connection, start: str, end: str,
             campaigns_filter: list[str] | None, kind: str = "positive",
-            search: str | None = None, limit: int = 2000) -> list[dict[str, Any]]:
+            search: str | None = None, only_idle: bool = False) -> list[dict[str, Any]]:
+    """Объекты таргетинга за период: метрики, ставка, дата добавления, последнее событие.
+
+    Лимита на количество строк нет: таблица показывает все объекты, а страницы
+    рисует интерфейс — тихое усечение списка выдаёт «объект пропал» за «объекта нет».
+    """
     where, params = _camp_filter(campaigns_filter, "t.campaign_id")
     if kind == "negative":
         where += " AND t.is_negative=1"
@@ -164,9 +196,15 @@ def targets(conn: sqlite3.Connection, start: str, end: str,
                    t.is_negative, t.negative_level, t.state, t.bid, t.bid_source, t.effective_bid,
                    t.serving_status, t.created_at, t.updated_at,
                    COALESCE(c.name, '') campaign_name, COALESCE(g.name, '') ad_group_name,
+                   g.default_bid group_default_bid,
                    COALESCE(f.impressions,0) impressions, COALESCE(f.clicks,0) clicks,
                    COALESCE(f.spend,0) spend, COALESCE(f.orders,0) orders,
-                   COALESCE(f.sales,0) sales, COALESCE(f.units,0) units
+                   COALESCE(f.sales,0) sales, COALESCE(f.units,0) units,
+                   CASE WHEN COALESCE(f.impressions,0)=0 AND COALESCE(f.clicks,0)=0
+                        THEN 1 ELSE 0 END idle,
+                   ch.field last_field, ch.old_value last_old, ch.new_value last_new,
+                   ch.change_date last_date, ch.change_ts last_ts, ch.source last_source,
+                   ch.date_precision last_precision
             FROM dim_target t
             LEFT JOIN dim_campaign c ON c.campaign_id=t.campaign_id
             LEFT JOIN dim_adgroup g ON g.ad_group_id=t.ad_group_id
@@ -176,12 +214,33 @@ def targets(conn: sqlite3.Connection, start: str, end: str,
                        FROM fact_target_day WHERE date BETWEEN ? AND ?
                        GROUP BY campaign_id, ad_group_id, target_id) f
                    ON f.campaign_id=t.campaign_id AND f.ad_group_id=t.ad_group_id AND f.target_id=t.target_id
+            LEFT JOIN (SELECT entity_id, field, old_value, new_value, change_date, change_ts,
+                              source, date_precision,
+                              ROW_NUMBER() OVER (PARTITION BY entity_id
+                                                 ORDER BY change_date DESC, change_ts DESC) rn
+                       FROM changes WHERE entity_type IN {TARGET_TYPES}) ch
+                   ON ch.entity_id=t.target_id AND ch.rn=1
             WHERE 1=1 {where}
             ORDER BY t.is_negative, COALESCE(f.spend,0) DESC, t.targeting
-            LIMIT {int(limit)}""",
+            """,
         [start, end, *params],
     ).fetchall()
-    return [with_ratios(dict(r)) for r in rows]
+    result = [with_ratios(dict(r)) for r in rows]
+    for row in result:
+        row["targeting_raw"] = row["targeting"]
+        row["targeting"] = targeting_label(row["targeting"])
+    # Ставка объекта без собственного значения наследуется от группы. Считаем это
+    # при чтении тоже: в базе есть записи, загруженные до починки импорта, и они
+    # иначе показывают «ставка не задана» при живой ставке группы.
+    for row in result:
+        if (not row["is_negative"] and row["bid"] is None and row["effective_bid"] is None
+                and row["group_default_bid"] is not None):
+            row["effective_bid"] = row["group_default_bid"]
+            row["bid_source"] = "AD_GROUP_DEFAULT"
+        row.pop("group_default_bid", None)
+    if only_idle:
+        result = [r for r in result if r["idle"]]
+    return result
 
 
 def search_terms(conn: sqlite3.Connection, start: str, end: str,
@@ -255,25 +314,85 @@ def products(conn: sqlite3.Connection, start: str, end: str,
     return [with_ratios(dict(r)) for r in rows]
 
 
-def changes(conn: sqlite3.Connection, start: str, end: str,
-            campaigns_filter: list[str] | None, search: str | None = None,
-            limit: int = 2000) -> list[dict[str, Any]]:
-    where, params = _camp_filter(campaigns_filter)
-    if search:
-        where += " AND (summary LIKE ? OR field LIKE ? OR entity_label LIKE ?)"
-        params += [f"%{search}%", f"%{search}%", f"%{search}%"]
-    rows = conn.execute(
-        f"""SELECT ch.change_id, ch.change_date, ch.change_ts, ch.date_precision, ch.entity_type,
-                   ch.entity_id, ch.campaign_id, ch.ad_group_id,
-                   COALESCE(NULLIF(ch.entity_label, ''), c.name, ch.entity_id) AS entity_label,
-                   ch.field, ch.old_value, ch.new_value, ch.delta,
-                   ch.source, ch.actor, ch.summary
-            FROM changes ch LEFT JOIN dim_campaign c ON c.campaign_id = ch.campaign_id
-            WHERE ch.change_date BETWEEN ? AND ? {where.replace('campaign_id', 'ch.campaign_id')}
-            ORDER BY ch.change_ts DESC, ch.change_date DESC LIMIT {int(limit)}""",
-        [start, end, *params],
-    ).fetchall()
-    return [dict(r) for r in rows]
+# Типы сущностей журнала, которые живут в dim_target: Amazon отдаёт ключи как
+# KEYWORD, ручные и авто-таргеты — как PRODUCT_TARGETING.
+TARGET_TYPES = ('KEYWORD', 'TARGET', 'PRODUCT_TARGETING', 'NEGATIVE_KEYWORD', 'NEGATIVE_TARGET',
+                'CAMPAIGN_NEGATIVE_KEYWORD', 'CAMPAIGN_NEGATIVE_TARGET')
+
+# Группы полей журнала для фильтра «что менялось»: заголовки в интерфейсе
+# совпадают с ключами, поэтому сервер и статика читают одну таблицу.
+FIELD_GROUPS = {
+    'status': ("STATUS",),
+    'bid': ("BID_AMOUNT", "DEFAULT_BID_AMOUNT", "BID"),
+    'budget': ("BUDGET_AMOUNT", "IN_BUDGET"),
+    'placement': ("PLACEMENT_TOP", "PLACEMENT_DETAIL_PAGE", "PLACEMENT_REST_OF_SEARCH",
+                  "PLACEMENT_PRODUCT_PAGE"),
+    'name': ("NAME",),
+    'created': ("CREATED",),
+}
+
+
+def changes(conn: sqlite3.Connection, start: str | None = None, end: str | None = None,
+            campaigns_filter: list[str] | None = None, search: str | None = None,
+            entity_type: str | list[str] | None = None, field: str | None = None,
+            field_group: str | None = None) -> list[dict[str, Any]]:
+    # Older Amazon history rows can contain the campaign ID as the object's label.
+    # Never use the parent campaign's name as the name of a missing child.
+    where, params = _camp_filter(campaigns_filter, 'v.campaign_id')
+    for column, op, value in [('change_date', '>=', start), ('change_date', '<=', end),
+                              ('field', '=', field)]:
+        if value:
+            where += f' AND v.{column} {op} ?'
+            params.append(value)
+    types = [entity_type] if isinstance(entity_type, str) else list(entity_type or [])
+    types = [t for t in types if t]
+    if types:
+        where += f" AND v.entity_type IN ({','.join('?' for _ in types)})"
+        params += types
+    if field_group:
+        group = FIELD_GROUPS.get(field_group)
+        if group is None:
+            raise ValueError(f"неизвестная группа полей: {field_group}")
+        where += f" AND v.field IN ({','.join('?' for _ in group)})"
+        params += list(group)
+    rows = conn.execute(f"""
+        WITH v AS (
+            SELECT ch.change_id, ch.change_date, ch.change_ts, ch.date_precision, ch.entity_type,
+                   ch.entity_id, ch.ad_group_id, ch.field, ch.old_value, ch.new_value, ch.delta,
+                   ch.source, ch.actor, ch.summary,
+                   COALESCE(NULLIF(ch.campaign_id,''), CASE WHEN ch.entity_type='CAMPAIGN'
+                            THEN ch.entity_id END, t.campaign_id, g.campaign_id, a.campaign_id) campaign_id,
+                   ch.entity_label saved_label, COALESCE(NULLIF(g.name,''), gr.name, '') ad_group_name,
+                   COALESCE(NULLIF(t.targeting,''),NULLIF(g.name,''),
+                                                        NULLIF(a.asin,''),NULLIF(a.sku,'')) object_name
+            FROM changes ch
+            LEFT JOIN dim_target t ON ch.entity_type IN {TARGET_TYPES} AND t.target_id=ch.entity_id
+                AND (NULLIF(ch.campaign_id,'') IS NULL OR t.campaign_id=ch.campaign_id)
+            LEFT JOIN dim_adgroup g ON ch.entity_type='AD_GROUP' AND g.ad_group_id=ch.entity_id
+                AND (NULLIF(ch.campaign_id,'') IS NULL OR g.campaign_id=ch.campaign_id)
+            LEFT JOIN dim_adgroup gr ON gr.ad_group_id=ch.ad_group_id
+            LEFT JOIN dim_ad a ON ch.entity_type='AD' AND a.ad_id=ch.entity_id
+                AND (NULLIF(ch.campaign_id,'') IS NULL OR a.campaign_id=ch.campaign_id)
+        )
+        SELECT v.*, COALESCE(NULLIF(c.name,''),v.campaign_id) campaign_name,
+               COALESCE(NULLIF(NULLIF(NULLIF(v.saved_label,''),v.campaign_id),v.entity_id),
+                        CASE WHEN v.entity_type='CAMPAIGN' THEN NULLIF(c.name,'') END,
+                        v.object_name, v.entity_id) entity_label
+        FROM v LEFT JOIN dim_campaign c ON c.campaign_id=v.campaign_id
+        WHERE 1=1 {where}
+        ORDER BY v.change_date DESC, julianday(v.change_ts) DESC, v.change_id DESC""", params)
+    result = []
+    for row in rows:
+        if search and not any(search.lower() in (row[key] or '').lower()
+                              for key in ('campaign_name', 'entity_label', 'summary', 'field')):
+            continue
+        item = {k: row[k] for k in row.keys() if k not in ('saved_label', 'object_name')}
+        if item["ad_group_name"] == item["ad_group_id"]:
+            item["ad_group_name"] = ""
+        if item["entity_type"] in TARGET_TYPES and item["entity_label"]:
+            item["entity_label"] = targeting_label(item["entity_label"])
+        result.append(item)
+    return result
 
 
 def meta(conn: sqlite3.Connection) -> dict[str, Any]:

@@ -9,6 +9,7 @@ from pathlib import Path
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
 
 from . import queries
 from .config import Account, settings
@@ -191,9 +192,11 @@ def api_campaigns(start: str | None = None, end: str | None = None,
 def api_targets(start: str | None = None, end: str | None = None,
                 campaigns: str | None = None, kind: str = "positive",
                 q: str | None = None, status: str | None = None,
+                idle: bool = False,
                 conn=Depends(db), _=Depends(require_auth)):
     s, e = _window(start, end, 30)
-    return queries.targets(conn, s, e, _scope(conn, status, _campaigns(campaigns)), kind, q)
+    return queries.targets(conn, s, e, _scope(conn, status, _campaigns(campaigns)), kind, q,
+                           only_idle=idle)
 
 
 @app.get("/api/terms")
@@ -224,12 +227,17 @@ def api_products(start: str | None = None, end: str | None = None,
 @app.get("/api/changes")
 def api_changes(start: str | None = None, end: str | None = None,
                 campaigns: str | None = None, q: str | None = None,
-                status: str | None = None,
+                status: str | None = None, group: str | None = None,
+                group_by: str | None = None, entity: str | None = None,
                 conn=Depends(db), _=Depends(require_auth)):
     today = date.today()
     s = start or (today - timedelta(days=90)).isoformat()
     e = end or today.isoformat()
-    return queries.changes(conn, s, e, _scope(conn, status, _campaigns(campaigns)), q)
+    try:
+        return queries.changes(conn, s, e, _scope(conn, status, _campaigns(campaigns)), q,
+                               entity_type=_campaigns(entity), field_group=group or group_by)
+    except ValueError as err:
+        raise HTTPException(status_code=400, detail=str(err)) from err
 
 
 @app.get("/api/coverage")
