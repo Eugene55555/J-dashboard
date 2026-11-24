@@ -31,6 +31,7 @@ function savePrefs() {
       termSearch: state.termSearch || '', termOrders: !!state.termOrders,
       changeSearch: state.changeSearch || '', chart: state.chart || 'money',
       sort: state.sort || {},
+      filtersOpen: state.filtersOpen,
     }));
   } catch (e) { /* приватный режим — молча пропускаем */ }
 }
@@ -154,10 +155,20 @@ const TITLES = {
 };
 
 function paintChrome(view) {
-  $('.filters').classList.toggle('hidden', view === 'data');
+  applyFiltersVisibility();
   $$('#nav button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
   $('#view-title').textContent = TITLES[view][0];
   $('#view-sub').textContent = TITLES[view][1];
+}
+
+function applyFiltersVisibility() {
+  const mobile = window.matchMedia('(max-width: 820px)').matches;
+  $('.filters').classList.toggle('hidden', state.view === 'data' || (mobile && !state.filtersOpen));
+  const toggle = $('#filters-toggle');
+  if (toggle) {
+    toggle.classList.toggle('hidden', !mobile);
+    toggle.textContent = 'Фильтры ' + (state.filtersOpen ? '▴' : '▾');
+  }
 }
 
 function setView(view) {
@@ -378,26 +389,52 @@ function sortRows(rows, key, dir) {
   });
 }
 
+const MOBILE_ROWS = 300;
+
 function tableHtml(id, columns, rows, opts = {}) {
   const sort = state.sort[id] || { key: opts.defaultSort, dir: opts.defaultDir || 'desc' };
-  const data = sortRows(rows, sort.key, sort.dir);
+  const compactMode = window.matchMedia('(max-width: 820px)').matches;
+  const full = sortRows(rows, sort.key, sort.dir);
+  const data = compactMode && full.length > MOBILE_ROWS ? full.slice(0, MOBILE_ROWS) : full;
+  const truncated = full.length - data.length;
   const head = columns.map((c) => {
     const arrow = sort.key === c.key ? `<span class="arrow">${sort.dir === 'asc' ? '▲' : '▼'}</span>` : '';
     return `<th class="${c.left ? 'left' : ''}" data-sort-table="${id}" data-key="${c.key}" style="${c.width ? `width:${c.width}` : ''}">${c.label}${arrow}</th>`;
   }).join('');
   const body = data.map((row) => `<tr>${columns.map((c) => {
     const cls = c.left ? 'left' : '';
-    return `<td class="${cls}">${c.render ? c.render(row) : esc(row[c.key])}</td>`;
+    return `<td class="${cls}" data-label="${esc(c.label)}">${c.render ? c.render(row) : esc(row[c.key])}</td>`;
   }).join('')}</tr>`).join('');
+
+  // На телефоне шапка таблицы скрыта — сортировку даём отдельным списком.
+  const compact = compactMode;
+  const sorter = compact ? `
+    <div class="sort-mobile">
+      <span>Сортировка</span>
+      <select data-sort-select="${id}">
+        ${columns.map((c) => `<option value="${esc(c.key)}" ${sort.key === c.key ? 'selected' : ''}>${esc(c.label)}${sort.key === c.key ? (sort.dir === 'asc' ? ' ↑' : ' ↓') : ''}</option>`).join('')}
+      </select>
+    </div>` : '';
+
   return `<div class="table-wrap"><table>
     <thead><tr>${head}</tr></thead>
     <tbody>${body || `<tr><td colspan="${columns.length}"><div class="empty"><b>Нет данных за период</b>Измените даты или кампанию</div></td></tr>`}</tbody>
-  </table></div>`;
+  </table></div>${truncated > 0 ? `<div class="rows-note">Показаны первые ${MOBILE_ROWS} строк из ${full.length} — уточните период, кампанию или поиск.</div>` : ''}${sorter}`;
 }
 
 function totalsRow(columns, rows) { return null; }
 
 function bindSorts(root, redraw) {
+  $$('[data-sort-select]', root).forEach((select) => {
+    select.onchange = () => {
+      const id = select.dataset.sortSelect;
+      const key = select.value;
+      const cur = state.sort[id] || {};
+      state.sort[id] = { key, dir: cur.key === key && cur.dir === 'asc' ? 'desc' : (cur.key === key ? 'asc' : 'desc') };
+      savePrefs();
+      redraw();
+    };
+  });
   $$('[data-sort-table]', root).forEach((th) => {
     th.onclick = () => {
       const id = th.dataset.sortTable;
@@ -972,6 +1009,15 @@ function bindChrome() {
   const statusFilter = $('#status-filter');
   statusFilter.onchange = () => { state.status = statusFilter.value; savePrefs(); render(); };
 
+  const filtersToggle = $('#filters-toggle');
+  if (filtersToggle) {
+    filtersToggle.onclick = () => {
+      state.filtersOpen = !state.filtersOpen;
+      savePrefs();
+      applyFiltersVisibility();
+    };
+  }
+
   const panel = $('#picker-panel');
   $('#picker-btn').onclick = (e) => { e.stopPropagation(); panel.classList.toggle('open'); };
   panel.onclick = (e) => e.stopPropagation();
@@ -988,6 +1034,7 @@ function bindChrome() {
     const q = e.target.value.toLowerCase();
     $$('#picker-list .picker-item').forEach((el) => { el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none'; });
   };
+  window.matchMedia('(max-width: 820px)').addEventListener('change', () => render());
   window.addEventListener('resize', () => {
     if (state.view === 'overview') {
       const canvas = $('#main-chart');
@@ -1021,7 +1068,10 @@ async function boot() {
   state.changeSearch = prefs.changeSearch || '';
   state.chart = prefs.chart || 'money';
   state.sort = prefs.sort && typeof prefs.sort === 'object' ? prefs.sort : {};
+  state.filtersOpen = typeof prefs.filtersOpen === 'boolean'
+    ? prefs.filtersOpen : !window.matchMedia('(max-width: 820px)').matches;
   paintChrome(state.view);
+  applyFiltersVisibility();
 
   const logout = $('#btn-logout');
   if (logout) {
