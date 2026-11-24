@@ -163,6 +163,12 @@ function paintChrome(view) {
 
 function applyFiltersVisibility() {
   const mobile = window.matchMedia('(max-width: 820px)').matches;
+  $$('#nav button').forEach((b) => {
+    const label = b.querySelector('.nav-text');
+    if (!label) return;
+    if (!b.dataset.full) b.dataset.full = label.textContent;
+    label.textContent = mobile ? (b.dataset.short || b.dataset.full) : b.dataset.full;
+  });
   $('.filters').classList.toggle('hidden', state.view === 'data' || (mobile && !state.filtersOpen));
   const toggle = $('#filters-toggle');
   if (toggle) {
@@ -452,6 +458,12 @@ function nameCell(name, stateVal, sub) {
     <div><div class="nm">${esc(name || '—')}</div>${sub ? `<div class="mono">${esc(sub)}</div>` : ''}</div></div>`;
 }
 
+function budgetCell(r) {
+  if (!r.budget) return '—';
+  const suffix = r.budget_type === 'DAILY' ? '/день' : (r.budget_type === 'LIFETIME' ? ' всего' : '');
+  return '$' + fmtMoney0(r.budget) + suffix;
+}
+
 function barCell(value, max, text) {
   const pct = max ? Math.min(100, (value / max) * 100) : 0;
   return `<div class="bar-cell"><div class="bar" style="width:${pct}%"></div><span class="money">${text}</span></div>`;
@@ -534,7 +546,7 @@ views.overview = async () => {
       <div class="card-head"><div><div class="card-title">Кампании</div><div class="card-sub">сортировка по расходу</div></div></div>
       ${tableHtml('ov-campaigns', [
         { key: 'name', label: 'Кампания', left: true, render: (r) => nameCell(r.name, r.state, r.campaign_id) },
-        { key: 'budget', label: 'Бюджет', render: (r) => r.budget ? '$' + fmtMoney0(r.budget) : '—' },
+        { key: 'budget', label: 'Бюджет', render: budgetCell },
         { key: 'impressions', label: 'Показы', render: (r) => fmtInt(r.impressions) },
         { key: 'clicks', label: 'Клики', render: (r) => fmtInt(r.clicks) },
         { key: 'ctr', label: 'CTR', render: (r) => fmtPct(r.ctr) },
@@ -568,7 +580,7 @@ views.campaigns = async () => {
       <div id="cmp-table">${tableHtml('campaigns', [
         { key: 'name', label: 'Кампания', left: true, render: (r) => nameCell(r.name, r.state, r.campaign_id) },
         { key: 'state', label: 'Статус', left: true, render: (r) => `<span class="tag ${r.state === 'ENABLED' ? 'ok' : ''}">${esc(r.state)}</span>` },
-        { key: 'budget', label: 'Бюджет', render: (r) => r.budget ? '$' + fmtMoney0(r.budget) : '—' },
+        { key: 'budget', label: 'Бюджет', render: budgetCell },
         { key: 'bid_strategy', label: 'Стратегия', left: true, render: (r) => `<span class="mono">${esc(r.bid_strategy || '—')}</span>${r.adj_top ? `<div class="mono">TOS +${fmtPct(r.adj_top, 0)}</div>` : ''}` },
         { key: 'impressions', label: 'Показы', render: (r) => fmtInt(r.impressions) },
         { key: 'clicks', label: 'Клики', render: (r) => fmtInt(r.clicks) },
@@ -1034,7 +1046,10 @@ function bindChrome() {
     const q = e.target.value.toLowerCase();
     $$('#picker-list .picker-item').forEach((el) => { el.style.display = el.textContent.toLowerCase().includes(q) ? '' : 'none'; });
   };
-  window.matchMedia('(max-width: 820px)').addEventListener('change', () => render());
+  window.matchMedia('(max-width: 820px)').addEventListener('change', () => {
+    applyFiltersVisibility();
+    render();
+  });
   window.addEventListener('resize', () => {
     if (state.view === 'overview') {
       const canvas = $('#main-chart');
