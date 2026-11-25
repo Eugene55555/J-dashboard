@@ -64,6 +64,30 @@ class Coverage(unittest.TestCase):
         self.assertEqual(data['coverage']['missing'], [['2026-11-03', '2026-11-03']])
         self.assertEqual(data['current']['impressions'], 100)
 
+    def test_previous_window_gaps_are_reported(self):
+        # Текущее окно 03–09.11 полное; в прошлом 27.10–02.11 нет 31.10.
+        for day in ('2026-10-27', '2026-10-28', '2026-10-29', '2026-10-30',
+                    '2026-11-01', '2026-11-02',
+                    '2026-11-03', '2026-11-04', '2026-11-05', '2026-11-06',
+                    '2026-11-07', '2026-11-08', '2026-11-09'):
+            self.fact(day)
+        data = queries.overview(self.db, '2026-11-03', '2026-11-09', None)
+        self.assertEqual(data['period']['previous'],
+                         {'start': '2026-10-27', 'end': '2026-11-02'})
+        self.assertEqual(data['previous_coverage']['days'], 6)
+        self.assertEqual(data['previous_coverage']['missing'],
+                         [['2026-10-31', '2026-10-31']])
+        self.assertEqual(data['coverage']['missing'], [])
+
+    def test_previous_window_without_data_reports_zero_days(self):
+        for day in ('2026-11-03', '2026-11-04'):
+            self.fact(day)
+        data = queries.overview(self.db, '2026-11-03', '2026-11-04', None)
+        # Окно сравнения пустое целиком: интерфейс не должен звать это «неполным».
+        self.assertEqual(data['previous_coverage']['days'], 0)
+        self.assertEqual(len(data['previous_coverage']['missing']), 1)
+        self.assertEqual(data['current']['impressions'], 200)
+
 
 if __name__ == '__main__':
     unittest.main()

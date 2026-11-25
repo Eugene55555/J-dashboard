@@ -264,6 +264,10 @@ window.LocalAPI = (() => {
     const prevRows = DATA.facts.campaign_day.filter((r) =>
       inWindow(r[0], prevStart, prevEnd) && (!picked || picked.has(r[1])));
     const previous = ratios(sum(prevRows, factCampaignRow));
+    const previous_coverage = {
+      days: [...have].filter((d) => inWindow(d, prevStart, prevEnd)).length,
+      missing: missingRanges(prevStart, prevEnd, have),
+    };
 
     const buckets = new Map();
     rows.forEach((r) => {
@@ -299,6 +303,7 @@ window.LocalAPI = (() => {
       data_range: { min: DATA.meta.date_min, max: DATA.meta.date_max,
         days: daysBetween(DATA.meta.date_min, DATA.meta.date_max) },
       coverage,
+      previous_coverage,
     };
   }
 

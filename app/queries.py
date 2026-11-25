@@ -164,6 +164,11 @@ def overview(conn: sqlite3.Connection, start: str, end: str,
     # кабинету — фильтр кампаний не должен превращать загруженный день в пропуск.
     present = [r[0] for r in conn.execute(
         "SELECT DISTINCT date FROM fact_campaign_day WHERE date BETWEEN ? AND ?", (start, end))]
+    # То же для окна сравнения: если в нём есть дни без данных, дельта считается
+    # по неполному периоду, и об этом нужно сказать, а не молчать.
+    prev_present = [r[0] for r in conn.execute(
+        "SELECT DISTINCT date FROM fact_campaign_day WHERE date BETWEEN ? AND ?",
+        (prev_start.isoformat(), prev_end.isoformat()))]
 
     return {
         "period": {"start": start, "end": end, "days": length,
@@ -174,6 +179,10 @@ def overview(conn: sqlite3.Connection, start: str, end: str,
         "campaigns": top_rows,
         "data_range": {"min": coverage[0], "max": coverage[1], "days": coverage[2]},
         "coverage": {"days": len(present), "missing": missing_ranges(start, end, present)},
+        "previous_coverage": {
+            "days": len(prev_present),
+            "missing": missing_ranges(prev_start.isoformat(), prev_end.isoformat(), prev_present),
+        },
     }
 
 

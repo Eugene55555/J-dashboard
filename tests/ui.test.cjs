@@ -48,3 +48,24 @@ test('custom period: inverted, empty or future dates are refused instead of rewr
   assert.equal(ok.start,'2026-11-03');assert.equal(ok.end,'2026-11-09');assert.equal(ok.error,undefined);
   assert.equal(run("customRange('2026-11-09','2026-11-09').error"),undefined,'один день допустим');
 });
+test('overview: incomplete previous window is flagged, fully empty one is not', async()=>{
+  const base={
+    period:{start:'2026-11-03',end:'2026-11-09',days:7,previous:{start:'2026-10-27',end:'2026-11-02'}},
+    current:{impressions:700,clicks:10,spend:5,orders:1,sales:20,units:1,ctr:1.43,cpc:0.5,cpa:5,acos:25,roas:4,cvr:10,aov:20},
+    previous:{impressions:600,clicks:8,spend:4,orders:1,sales:16,units:1,ctr:1.33,cpc:0.5,cpa:4,acos:25,roas:4,cvr:12.5,aov:16},
+    series:[{bucket:'2026-11-03',impressions:700,clicks:10,spend:5,orders:1,sales:20,units:1,ctr:1.43,cpc:0.5,acos:25,roas:4}],
+    campaigns:[{campaign_id:'c1',name:'Blue',state:'ENABLED',budget:1,impressions:700,clicks:10,spend:5,orders:1,sales:20,units:1,ctr:1.43,cpc:0.5,acos:25,roas:4}],
+    data_range:{min:'2026-11-03',max:'2026-11-09',days:7},
+    coverage:{days:7,missing:[]},
+    previous_coverage:{days:6,missing:[['2026-10-31','2026-10-31']]},
+  };
+  const run=ui();
+  run(`api=async()=>(${JSON.stringify(base)});`);
+  const flagged=await run('views.overview()');
+  assert.match(flagged,/Сравнение неполное/);
+  assert.match(flagged,/31\.10\.2026/);
+
+  const empty={...base,previous_coverage:{days:0,missing:[['2026-10-27','2026-11-02']]}};
+  run(`api=async()=>(${JSON.stringify(empty)});`);
+  assert.doesNotMatch(await run('views.overview()'),/Сравнение неполное/);
+});

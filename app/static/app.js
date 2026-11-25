@@ -626,11 +626,16 @@ views.overview = async () => {
   const totalSpend = spending.reduce((a, c) => a + c.spend, 0) || 1;
   const gap = (data.coverage && data.coverage.missing) || [];
   const gapDayCount = gapDays(gap);
+  const prevCoverage = data.previous_coverage || {};
+  const prevGap = prevCoverage.missing || [];
+  // Пустое окно сравнения — это отсутствие данных, а не «неполнота»: дельт там нет.
+  const prevGapDays = prevGap.length && (prevCoverage.days || 0) > 0 ? gapDays(prevGap) : 0;
 
   return `
     <div class="kpis">${cards}</div>
     ${data.data_range.min && data.data_range.min > data.period.start ? notice(`<b>Данные начинаются с ${fmtDate(data.data_range.min)}.</b> За более ранние дни отчётов в базе нет — они не показаны как нули.`) : ''}
     ${gap.length ? notice(`<b>Нет данных за ${fmtInt(gapDayCount)} ${plural(gapDayCount, ['день', 'дня', 'дней'])}: ${gapText(gap)}.</b> Суммы и сравнение с прошлым периодом считаются только по загруженным дням.`) : ''}
+    ${prevGapDays ? notice(`<b>Сравнение неполное: в прошлом периоде ${fmtDate(data.period.previous.start)}—${fmtDate(data.period.previous.end)} нет данных за ${fmtInt(prevGapDays)} ${plural(prevGapDays, ['день', 'дня', 'дней'])}: ${gapText(prevGap)}.</b> Дельты «к прошлому периоду» могут быть искажены.`) : ''}
     ${cur.orders === 0 ? notice('<b>В выбранном периоде нет заказов.</b> Это может быть нормально для узкого окна; проверьте даты и кампании.') : ''}
     <div class="grid-2">
       <div class="card">
