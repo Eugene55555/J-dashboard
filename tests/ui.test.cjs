@@ -38,3 +38,13 @@ test('coverage gaps: day count and shortened list',()=>{
   assert.equal(run("gapText([['2026-09-02','2026-09-02']])"),'02.09.2026');
   assert.match(run("gapText([['2026-06-28','2026-08-22'],['2026-08-28','2026-08-31'],['2026-09-02','2026-09-02'],['2026-10-01','2026-10-02']])"),/и ещё 1$/);
 });
+test('custom period: inverted, empty or future dates are refused instead of rewritten',()=>{
+  const run=ui();
+  assert.match(run("customRange('2026-11-20','2026-11-10').error"),
+    /Период не изменён: начало 20\.11\.2026 позже конца 10\.11\.2026/);
+  assert.match(run("customRange('','2026-11-10').error"), /укажите обе даты/);
+  assert.match(run("customRange('2099-01-01','2099-02-01').error"), /отчётов ещё нет/);
+  const ok=run("customRange('2026-11-03','2026-11-09')");
+  assert.equal(ok.start,'2026-11-03');assert.equal(ok.end,'2026-11-09');assert.equal(ok.error,undefined);
+  assert.equal(run("customRange('2026-11-09','2026-11-09').error"),undefined,'один день допустим');
+});

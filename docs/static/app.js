@@ -123,6 +123,7 @@ function query() {
 /* ---------- каркас ---------- */
 function setPeriod(preset) {
   state.preset = preset;
+  setDateError('');
   const today = state.today || todayISO();
   if (preset === 'month') { state.start = monthStart(today); state.end = today; }
   else if (preset === 'prev_month') { [state.start, state.end] = prevMonthRange(today); }
@@ -148,6 +149,30 @@ function updatePill() {
     ? Math.round((Date.parse(state.end) - Date.parse(state.start)) / 86400000) + 1 : 0;
   $('#pill-days').textContent = days > 0
     ? `${days} дн. · ${fmtDate(state.start)} — ${fmtDate(state.end)}` : '—';
+}
+
+/* «Свой» период: проверяем ввод, а не правим даты молча. */
+function customRange(start, end) {
+  if (!start || !end) return { error: 'Период не изменён: укажите обе даты.' };
+  if (start > end) {
+    return { error: `Период не изменён: начало ${fmtDate(start)} позже конца ${fmtDate(end)}.` };
+  }
+  if (start > todayISO()) {
+    return { error: `Период не изменён: за ${fmtDate(start)} отчётов ещё нет — они приходят с задержкой.` };
+  }
+  return { start, end };
+}
+
+function setDateError(text) {
+  const box = $('#date-error');
+  if (box && box.classList) {
+    box.textContent = text || '';
+    box.classList.toggle('hidden', !text);
+  }
+  for (const sel of ['#date-start', '#date-end']) {
+    const el = $(sel);
+    if (el && el.setAttribute) el.setAttribute('aria-invalid', text ? 'true' : 'false');
+  }
 }
 
 const TITLES = {
@@ -1186,18 +1211,18 @@ function bindChrome() {
   $$('#presets button').forEach((b) => {
     b.onclick = () => { setPeriod(b.dataset.preset); if (b.dataset.preset === 'custom') $('#date-start').focus(); render(); };
   });
-  $('#date-start').onchange = () => {
-    state.start = $('#date-start').value; state.end = $('#date-end').value;
-    if (state.start > state.end) { state.end = state.start; $('#date-end').value = state.end; }
-    state.preset = 'custom'; $$('#presets button').forEach((x) => x.classList.toggle('active', x.dataset.preset === 'custom'));
+  const applyCustomDates = () => {
+    const parsed = customRange($('#date-start').value, $('#date-end').value);
+    if (parsed.error) { setDateError(parsed.error); return; }   // период оставляем прежним
+    setDateError('');
+    state.start = parsed.start;
+    state.end = parsed.end;
+    state.preset = 'custom';
+    $$('#presets button').forEach((x) => x.classList.toggle('active', x.dataset.preset === 'custom'));
     updatePill(); savePrefs(); render();
   };
-  $('#date-end').onchange = () => {
-    state.end = $('#date-end').value; state.start = $('#date-start').value;
-    if (state.start > state.end) { state.start = state.end; $('#date-start').value = state.start; }
-    state.preset = 'custom'; $$('#presets button').forEach((x) => x.classList.toggle('active', x.dataset.preset === 'custom'));
-    updatePill(); savePrefs(); render();
-  };
+  $('#date-start').onchange = applyCustomDates;
+  $('#date-end').onchange = applyCustomDates;
 
   const statusFilter = $('#status-filter');
   statusFilter.onchange = () => { state.status = statusFilter.value; savePrefs(); render(); };
@@ -1295,6 +1320,12 @@ async function boot() {
     ? prefs.filtersOpen : !window.matchMedia('(max-width: 820px)').matches;
   paintChrome(state.view);
   applyFiltersVisibility();
+  // Будущие даты выбирать бессмысленно: отчётов за них ещё нет.
+  const today = todayISO();
+  for (const sel of ['#date-start', '#date-end']) {
+    const el = $(sel);
+    if (el) el.max = today;
+  }
 
   const logout = $('#btn-logout');
   if (logout) {
@@ -1309,7 +1340,7 @@ async function boot() {
   }
   try {
     await loadMeta();
-    if (state.preset === 'custom' && state.start && state.end) {
+    if (state.preset === 'custom' && state.start && state.end && state.start <= state.end) {
       $('#date-start').value = state.start;
       $('#date-end').value = state.end;
       $$('#presets button').forEach((x) => x.classList.toggle('active', x.dataset.preset === 'custom'));
