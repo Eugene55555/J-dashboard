@@ -36,6 +36,7 @@ SHARED = (
     "ingest/schema.sql",
     "tests/campaign-picker.browser.cjs",
     "tests/test_coverage.py",
+    "tests/test_fix_negative_levels.py",
     "tests/test_history_pull.py",
     "tests/test_history_view.py",
     "tests/test_ingest.py",
@@ -48,6 +49,7 @@ SHARED = (
     "tests/ui-filters.test.cjs",
     "tests/ui-unlock.test.cjs",
     "tests/ui.test.cjs",
+    "tools/fix_negative_levels.py",
     "tools/sync_shared.py",
 )
 
