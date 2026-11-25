@@ -45,7 +45,8 @@ class DetectTests(unittest.TestCase):
         self.assertEqual(settings_kind({"adGroupId": "1", "defaultBid": 0.2}), "adgroups")
         self.assertEqual(settings_kind({"adId": "1", "asin": "B0"}), "ads")
         self.assertEqual(settings_kind({"targetId": "1", "expression": [], "bid": 0.2}), "targets")
-        self.assertEqual(settings_kind({"targetId": "1", "expression": []}), "negative_targets")
+        self.assertEqual(settings_kind({"targetId": "1", "expression": [], "adGroupId": "2"}), "negative_targets")
+        self.assertEqual(settings_kind({"targetId": "1", "expression": []}), "campaign_negative_targets")
         self.assertEqual(settings_kind({"keywordId": "1", "matchType": "EXACT", "bid": 0.2}), "keywords")
         self.assertEqual(
             settings_kind({"keywordId": "1", "matchType": "NEGATIVE_EXACT", "adGroupId": "2"}),

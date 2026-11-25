@@ -54,7 +54,9 @@ def settings_kind(row: dict[str, Any]) -> str | None:
     if "budget" in keys or ("campaignId" in keys and "targetingType" in keys):
         return "campaigns"
     if "targetId" in keys:
-        return "negative_targets" if "bid" not in keys else "targets"
+        if "bid" in keys:
+            return "targets"
+        return "negative_targets" if row.get("adGroupId") else "campaign_negative_targets"
     if "keywordId" in keys:
         match = str(row.get("matchType") or "").upper()
         negative = match.startswith("NEGATIVE") or "negativeKeywordId" in keys
