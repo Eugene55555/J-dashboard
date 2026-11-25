@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # Общий код: должен совпадать байт в байт в обоих репозиториях.
 SHARED = (
+    ".github/workflows/drift.yml",
     "app/config.py",
     "app/main.py",
     "app/queries.py",

@@ -1,0 +1,46 @@
+name: сверка общей части
+
+# Оба кабинета — копии одного кода. Расхождение опасно тем, что видно только
+# по данным: в D когда-то лежал фикс ingest/detect.py, которого не было в J.
+#
+# Почему по расписанию, а не на push: совместная правка публикуется двумя
+# пушами подряд (сначала один репозиторий, через секунды второй). Проверка на
+# push гарантированно краснела бы на промежуточном состоянии, а красный CI,
+# который «сам пройдёт», перестают читать.
+#
+# Значения берутся из env-переменных раннера ($GITHUB_REPOSITORY, $RUNNER_TEMP),
+# а не из ${{ }} — вставлять в run: нечего, инъекции нет.
+on:
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Клон соседнего репозитория
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REPOSITORY" = "Eugene55555/J-dashboard" ]; then
+            sibling=D-dashboard
+          else
+            sibling=J-dashboard
+          fi
+          git clone --depth 1 --quiet "https://github.com/Eugene55555/${sibling}.git" "$RUNNER_TEMP/sibling"
+          echo "сосед: $sibling"
+
+      - name: Сверка
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REPOSITORY" = "Eugene55555/J-dashboard" ]; then
+            source=$GITHUB_WORKSPACE; target=$RUNNER_TEMP/sibling
+          else
+            source=$RUNNER_TEMP/sibling; target=$GITHUB_WORKSPACE
+          fi
+          python3 tools/sync_shared.py --check --source "$source" --target "$target"
