@@ -27,7 +27,7 @@ except ImportError:  # локальная сборка без шифровани
     AESGCM = None
 
 STATIC_SRC = ROOT / "app" / "static"
-PAGES = ("index.html", "style.css", "app.js", "local.js")
+PAGES = ("index.html", "style.css", "app.js", "local.js", "favicon.svg")
 
 GATE_HTML = """<div class="gate hidden" id="gate">
   <form class="gate-card" id="gate-form" autocomplete="on">
@@ -85,9 +85,11 @@ def write_ui(out_dir: Path, *, encrypted: bool) -> None:
     (assets / "style.css").write_text((STATIC_SRC / "style.css").read_text(encoding="utf-8"), encoding="utf-8")
     (assets / "app.js").write_text((STATIC_SRC / "app.js").read_text(encoding="utf-8"), encoding="utf-8")
     (assets / "local.js").write_text((STATIC_SRC / "local.js").read_text(encoding="utf-8"), encoding="utf-8")
+    (assets / "favicon.svg").write_text((STATIC_SRC / "favicon.svg").read_text(encoding="utf-8"), encoding="utf-8")
 
     html = (STATIC_SRC / "index.html").read_text(encoding="utf-8")
     html = html.replace('href="/static/style.css"', 'href="static/style.css"')
+    html = html.replace('href="/static/favicon.svg"', 'href="static/favicon.svg"')
     html = html.replace('<script src="/static/app.js"></script>',
                         '<script>window.J_STATIC = { dataUrl: "data.json" };</script>\n'
                         '<script src="static/local.js"></script>\n'
@@ -107,7 +109,7 @@ def write_ui(out_dir: Path, *, encrypted: bool) -> None:
         version = hashlib.sha256((out_dir / "data.json").read_bytes()).hexdigest()[:12]
         html = html.replace('dataUrl: "data.json"', f'dataUrl: "data.json?v={version}"')
     assert "J_STATIC" in html and 'href="static/style.css"' in html
-    for name in ("style.css", "app.js", "local.js"):
+    for name in ("style.css", "app.js", "local.js", "favicon.svg"):
         version = hashlib.sha256((assets / name).read_bytes()).hexdigest()[:12]
         html = html.replace(f'"static/{name}"', f'"static/{name}?v={version}"')
     (out_dir / "index.html").write_text(html, encoding="utf-8")
