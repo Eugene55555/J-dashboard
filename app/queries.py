@@ -69,6 +69,25 @@ def _ratio(numerator: float, denominator: float) -> float | None:
     return round(numerator / denominator, 6) if denominator else None
 
 
+def missing_ranges(start: str, end: str, dates) -> list[list[str]]:
+    """Непрерывные отрезки дней внутри периода, за которые в базе нет строк фактов."""
+    have = set(dates)
+    out: list[list[str]] = []
+    day, last = date.fromisoformat(start), date.fromisoformat(end)
+    run: date | None = None
+    while day <= last:
+        if day.isoformat() in have:
+            if run is not None:
+                out.append([run.isoformat(), (day - timedelta(days=1)).isoformat()])
+                run = None
+        elif run is None:
+            run = day
+        day += timedelta(days=1)
+    if run is not None:
+        out.append([run.isoformat(), end])
+    return out
+
+
 def with_ratios(row: dict[str, Any]) -> dict[str, Any]:
     clicks = row.get("clicks") or 0
     impressions = row.get("impressions") or 0
@@ -141,6 +160,10 @@ def overview(conn: sqlite3.Connection, start: str, end: str,
     coverage = conn.execute(
         "SELECT MIN(date), MAX(date), COUNT(DISTINCT date) FROM fact_campaign_day"
     ).fetchone()
+    # Покрытие выбранного периода: день либо загружен, либо нет. Считаем по всему
+    # кабинету — фильтр кампаний не должен превращать загруженный день в пропуск.
+    present = [r[0] for r in conn.execute(
+        "SELECT DISTINCT date FROM fact_campaign_day WHERE date BETWEEN ? AND ?", (start, end))]
 
     return {
         "period": {"start": start, "end": end, "days": length,
@@ -150,6 +173,7 @@ def overview(conn: sqlite3.Connection, start: str, end: str,
         "series": series,
         "campaigns": top_rows,
         "data_range": {"min": coverage[0], "max": coverage[1], "days": coverage[2]},
+        "coverage": {"days": len(present), "missing": missing_ranges(start, end, present)},
     }
 
 
@@ -400,6 +424,9 @@ def meta(conn: sqlite3.Connection) -> dict[str, Any]:
         "SELECT campaign_id, name, state, budget FROM dim_campaign ORDER BY name"
     ).fetchall()
     span = conn.execute("SELECT MIN(date), MAX(date) FROM fact_campaign_day").fetchone()
+    coverage_days = conn.execute(
+        "SELECT COUNT(DISTINCT date) FROM fact_campaign_day"
+    ).fetchone()[0]
     last_run = conn.execute(
         "SELECT * FROM sync_runs ORDER BY started_at DESC LIMIT 1"
     ).fetchone()
@@ -414,6 +441,7 @@ def meta(conn: sqlite3.Connection) -> dict[str, Any]:
         "changes_min": changes_span[0],
         "date_min": span[0],
         "date_max": span[1],
+        "coverage_days": coverage_days,
         "last_run": dict(last_run) if last_run else None,
         "counts": counts,
         "targets": conn.execute(

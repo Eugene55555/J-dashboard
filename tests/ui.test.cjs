@@ -30,3 +30,11 @@ test('entire-history date inputs match the changes actually displayed',()=>{
 test('an explicit empty selection never falls back to all campaign results',()=>{
  const run=ui();run('state.all=false;state.selected.clear()');assert.equal(run("query().get('campaigns')"),'__none__');
 });
+test('coverage gaps: day count and shortened list',()=>{
+  const run=ui();
+  assert.equal(run("gapDays([['2026-06-28','2026-08-22']])"),56);
+  assert.equal(run("gapDays([['2026-06-28','2026-08-22'],['2026-09-02','2026-09-02']])"),57);
+  assert.equal(run("gapText([['2026-06-28','2026-08-22']])"),'28.06.2026—22.08.2026');
+  assert.equal(run("gapText([['2026-09-02','2026-09-02']])"),'02.09.2026');
+  assert.match(run("gapText([['2026-06-28','2026-08-22'],['2026-08-28','2026-08-31'],['2026-09-02','2026-09-02'],['2026-10-01','2026-10-02']])"),/и ещё 1$/);
+});

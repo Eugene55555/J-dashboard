@@ -120,6 +120,20 @@ window.LocalAPI = (() => {
   function daysBetween(start, end) {
     return Math.round((parseDate(end) - parseDate(start)) / 86400000) + 1;
   }
+  function distinctDays(rows) { return new Set(rows.map((r) => r[0])); }
+  /* Отрезки дней внутри периода, за которые в базе нет строк: та же логика, что
+     в app/queries.py::missing_ranges, иначе версии показывали бы разное покрытие. */
+  function missingRanges(start, end, have) {
+    const out = [];
+    let run = null;
+    for (let d = start; d <= end; d = addDays(d, 1)) {
+      if (have.has(d)) {
+        if (run) { out.push([run, addDays(d, -1)]); run = null; }
+      } else if (!run) run = d;
+    }
+    if (run) out.push([run, end]);
+    return out;
+  }
   function mondayOf(isoDate) {
     const d = parseDate(isoDate);
     const shift = (d.getUTCDay() + 6) % 7;
@@ -170,6 +184,11 @@ window.LocalAPI = (() => {
     const grain = params.get('grain') || 'day';
     const rows = DATA.facts.campaign_day.filter((r) =>
       inWindow(r[0], start, end) && (!picked || picked.has(r[1])));
+    const have = distinctDays(DATA.facts.campaign_day);
+    const coverage = {
+      days: [...have].filter((d) => inWindow(d, start, end)).length,
+      missing: missingRanges(start, end, have),
+    };
 
     const current = ratios(sum(rows, factCampaignRow));
     const length = daysBetween(start, end);
@@ -212,6 +231,7 @@ window.LocalAPI = (() => {
       current, previous, series, campaigns,
       data_range: { min: DATA.meta.date_min, max: DATA.meta.date_max,
         days: daysBetween(DATA.meta.date_min, DATA.meta.date_max) },
+      coverage,
     };
   }
 
@@ -477,6 +497,8 @@ window.LocalAPI = (() => {
       })),
       date_min: DATA.meta.date_min,
       date_max: DATA.meta.date_max,
+      coverage_days: DATA.meta.coverage_days
+        || new Set(DATA.facts.campaign_day.map((r) => r[0])).size,
       changes_min: DATA.meta.changes_min || null,
       last_run: DATA.runs[0] || null,
       counts: DATA.meta.counts,

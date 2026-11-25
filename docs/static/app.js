@@ -206,6 +206,19 @@ function skeleton() {
 
 function notice(text) { return `<div class="notice" style="margin-top:14px">${text}</div>`; }
 
+/* Пропуски внутри периода: отрезки [с, по] из ответа /api/overview. */
+function gapDays(ranges) {
+  return ranges.reduce((sum, r) => sum
+    + Math.round((Date.parse(r[1]) - Date.parse(r[0])) / 86400000) + 1, 0);
+}
+
+function gapText(ranges, limit = 3) {
+  const parts = ranges.slice(0, limit).map((r) => (r[0] === r[1]
+    ? fmtDate(r[0]) : `${fmtDate(r[0])}—${fmtDate(r[1])}`));
+  const rest = ranges.length - limit;
+  return rest > 0 ? `${parts.join(', ')} и ещё ${rest}` : parts.join(', ');
+}
+
 /* ---------- KPI ---------- */
 function delta(cur, prev, { inverse = false, pp = false, suffix = '%' } = {}) {
   if (cur === null || cur === undefined || prev === null || prev === undefined || prev === 0) {
@@ -586,10 +599,13 @@ views.overview = async () => {
   const tops = spending.slice(0, 8);
   const maxSpend = Math.max(...tops.map((c) => c.spend), 1);
   const totalSpend = spending.reduce((a, c) => a + c.spend, 0) || 1;
+  const gap = (data.coverage && data.coverage.missing) || [];
+  const gapDayCount = gapDays(gap);
 
   return `
     <div class="kpis">${cards}</div>
     ${data.data_range.min && data.data_range.min > data.period.start ? notice(`<b>Данные начинаются с ${fmtDate(data.data_range.min)}.</b> За более ранние дни отчётов в базе нет — они не показаны как нули.`) : ''}
+    ${gap.length ? notice(`<b>Нет данных за ${fmtInt(gapDayCount)} ${plural(gapDayCount, ['день', 'дня', 'дней'])}: ${gapText(gap)}.</b> Суммы и сравнение с прошлым периодом считаются только по загруженным дням.`) : ''}
     ${cur.orders === 0 ? notice('<b>В выбранном периоде нет заказов.</b> Это может быть нормально для узкого окна; проверьте даты и кампании.') : ''}
     <div class="grid-2">
       <div class="card">
@@ -902,10 +918,14 @@ views.data = async () => {
   }
   days.reverse().splice(120);
   const lastRun = cov.runs[0];
+  // Длина диапазона и число дней, за которые реально есть строки: 156 против 95.
+  const spanDays = meta.date_min && meta.date_max
+    ? Math.round((Date.parse(meta.date_max) - Date.parse(meta.date_min)) / 86400000) + 1 : 0;
+  const daysWithData = meta.coverage_days || spanDays;
 
   return `
     <div class="kpis data-kpis">
-      <div class="kpi"><div class="label">Период данных</div><div class="value data-span">${fmtDate(meta.date_min)} → ${fmtDate(meta.date_max)}</div><div class="sub">дней в базе: ${fmtInt(meta.coverage_days || (meta.date_min && meta.date_max ? Math.round((Date.parse(meta.date_max) - Date.parse(meta.date_min)) / 86400000) + 1 : 0))}</div></div>
+      <div class="kpi"><div class="label">Период данных</div><div class="value data-span">${fmtDate(meta.date_min)} → ${fmtDate(meta.date_max)}</div><div class="sub">дней с данными: ${fmtInt(daysWithData)} из ${fmtInt(spanDays)}</div></div>
       <div class="kpi"><div class="label">Строк фактов</div><div class="value">${fmtInt(meta.counts.fact_campaign_day)}</div><div class="sub">campaign-level за все дни</div></div>
       <div class="kpi"><div class="label">Объекты</div><div class="value">${fmtInt(meta.targets)}<span style="font-size:14px;color:var(--muted)"> / ${fmtInt(meta.negatives)}</span></div><div class="sub">таргетов / негативов</div></div>
       <div class="kpi"><div class="label">События журнала</div><div class="value">${fmtInt(meta.counts.changes)}</div><div class="sub">${meta.counts.changes ? 'изменения настроек и история Amazon' : 'появятся после следующей синхронизации'}</div></div>
