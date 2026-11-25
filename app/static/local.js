@@ -3,7 +3,10 @@
 
 window.LocalAPI = (() => {
   let DATA = null;
-  const UNLOCK_KEY = 'jd_password';
+  // В sessionStorage лежит производный ключ (base64), а не пароль: пароль владельца
+  // может совпадать с другими его аккаунтами, а ключ живёт только эту вкладку.
+  const UNLOCK_KEY = 'jd_key';
+  const LEGACY_KEY = 'jd_password';
 
   function b64ToBytes(value) {
     const binary = atob(value);
@@ -12,24 +15,48 @@ window.LocalAPI = (() => {
     return bytes;
   }
 
-  async function decryptWith(password, cfg) {
+  function bytesToB64(buffer) {
+    // exportKey отдаёт ArrayBuffer, а не Uint8Array — приводим явно.
+    const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  }
+
+  async function deriveKey(password, cfg) {
     const encoder = new TextEncoder();
     const baseKey = await crypto.subtle.importKey(
       'raw', encoder.encode((cfg.login || '') + '\u0000' + password), 'PBKDF2', false, ['deriveKey']);
-    const key = await crypto.subtle.deriveKey(
+    return crypto.subtle.deriveKey(
       { name: 'PBKDF2', salt: b64ToBytes(cfg.salt), iterations: cfg.iter, hash: cfg.hash || 'SHA-256' },
-      baseKey, { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+      baseKey, { name: 'AES-GCM', length: 256 }, true, ['decrypt']);
+  }
+
+  async function decryptWith(key, cfg) {
     const plain = await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: b64ToBytes(cfg.nonce) }, key, b64ToBytes(cfg.ct));
     return JSON.parse(new TextDecoder().decode(plain));
   }
 
+  async function savedKey() {
+    const saved = sessionStorage.getItem(UNLOCK_KEY);
+    if (!saved) return null;
+    try {
+      return await crypto.subtle.importKey('raw', b64ToBytes(saved),
+        { name: 'AES-GCM', length: 256 }, false, ['decrypt']);
+    } catch (err) {
+      sessionStorage.removeItem(UNLOCK_KEY);
+      return null;
+    }
+  }
+
   async function unlock() {
     const cfg = await (await fetch(window.J_STATIC.dataUrl, { cache: 'no-store' })).json();
-    const saved = sessionStorage.getItem(UNLOCK_KEY);
-    if (saved) {
+    sessionStorage.removeItem(LEGACY_KEY);  // пароль из прежней версии не держим
+    const key = await savedKey();
+    if (key) {
       try {
-        const data = await decryptWith(saved, cfg);
+        const data = await decryptWith(key, cfg);
         const ready = document.getElementById('gate');
         if (ready) ready.classList.add('hidden');
         document.body.classList.remove('locked');
@@ -55,8 +82,10 @@ window.LocalAPI = (() => {
         const button = document.getElementById('gate-btn');
         button.disabled = true;
         try {
-          const data = await decryptWith(passwordInput.value, cfg);
-          sessionStorage.setItem(UNLOCK_KEY, passwordInput.value);
+          const key = await deriveKey(passwordInput.value, cfg);
+          const data = await decryptWith(key, cfg);
+          sessionStorage.setItem(UNLOCK_KEY, bytesToB64(await crypto.subtle.exportKey('raw', key)));
+          passwordInput.value = '';
           gate.classList.add('hidden');
           document.body.classList.remove('locked');
           resolve(data);

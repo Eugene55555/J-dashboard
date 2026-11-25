@@ -1302,7 +1302,7 @@ async function boot() {
     if (canLogout) {
       logout.classList.remove('hidden');
       logout.onclick = () => {
-        sessionStorage.removeItem('jd_password');
+        sessionStorage.removeItem('jd_key');   // ключ сессии, пароль здесь не хранится
         location.reload();
       };
     }
