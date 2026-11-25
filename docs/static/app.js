@@ -1077,8 +1077,10 @@ async function loadMeta() {
   };
   $('#acct-meta').textContent = `${state.meta.campaigns.length} кампаний · данные по ${acct.data_through || '—'}`;
   $('#nav-changes').textContent = state.meta.counts.changes || '';
-  if (window.J_STATIC && state.meta.date_max) {
-    // В статической версии «сегодня» — последний день с данными.
+  if (state.meta.date_max) {
+    // «Сегодня» для периодов — последний день с данными: отчёт за текущий день
+    // появляется только после синхронизации, и пустой день занижал бы сравнение
+    // с прошлым периодом. В статической сборке так было с самого начала.
     state.today = state.meta.date_max;
     if (!['custom'].includes(state.preset)) setPeriod(state.preset);
   }
