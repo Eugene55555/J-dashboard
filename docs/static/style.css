@@ -7,7 +7,7 @@
   --line-soft: #172337;
   --text: #e8eefb;
   --muted: #8ba0bd;
-  --dim: #61758f;
+  --dim: #7a8fa9;
   --accent: #ff9900;
   --accent-2: #ffb84d;
   --blue: #4aa8ff;
@@ -543,6 +543,12 @@ tbody tr:last-child td { border-bottom: 0; }
 
   .search { width: 100%; min-width: 0; font-size: 14px; }
   .search, .sort-mobile select, .select-mini, .dates input[type="date"], .picker-search { font-size: 15px; }
+
+  /* Тап-таргеты на телефоне: 40px по высоте вместо 28–31 (WCAG AA — 24px,
+     комфортная норма Apple — 44px; берём середину, чтобы шапка не разрослась). */
+  .nav button, .seg button, .filters-toggle, .picker-btn, .select-mini,
+  .dates input[type="date"] { min-height: 40px; }
+  .seg button { padding: 0 11px; }
 }
 
 @media (max-width: 430px) {
