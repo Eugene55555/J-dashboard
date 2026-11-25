@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import threading
+import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
@@ -86,12 +88,73 @@ class LoginBody(BaseModel):
     password: str
 
 
+LOGIN_MAX_FAILS = 5      # столько неудач за окно считаем перебором
+LOGIN_WINDOW = 15 * 60   # окно наблюдения, секунды
+LOGIN_BLOCK = 5 * 60     # блокировка после превышения, секунды
+
+
+class LoginThrottle:
+    """Неудачные попытки входа на ключ (обычно IP): N за окно → пауза.
+
+    Счётчики живут в памяти процесса: перезапуск сервиса их сбрасывает, а при
+    нескольких воркерах у каждого свой. Для одного кабинета этого достаточно;
+    против офлайн-перебора шифротекста работает только стоимость PBKDF2.
+    """
+
+    def __init__(self, limit: int = LOGIN_MAX_FAILS, window: int = LOGIN_WINDOW,
+                 block: int = LOGIN_BLOCK):
+        self.limit, self.window, self.block = limit, window, block
+        self._fails: dict[str, list[float]] = {}
+        self._until: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def _wait(self, key: str, now: float) -> int:
+        until = self._until.get(key, 0.0)
+        return int(until - now + 0.999) if until > now else 0
+
+    def check(self, key: str, now: float | None = None) -> int:
+        """Сколько секунд осталось ждать. 0 — попытку можно делать."""
+        moment = time.time() if now is None else now
+        with self._lock:
+            return self._wait(key, moment)
+
+    def fail(self, key: str, now: float | None = None) -> int:
+        """Учесть неудачу и вернуть, сколько ждать перед следующей попыткой."""
+        moment = time.time() if now is None else now
+        with self._lock:
+            hits = [t for t in self._fails.get(key, []) if moment - t < self.window]
+            hits.append(moment)
+            if len(hits) >= self.limit:
+                self._until[key] = moment + self.block
+                self._fails.pop(key, None)
+            else:
+                self._fails[key] = hits
+            return self._wait(key, moment)
+
+    def reset(self, key: str) -> None:
+        with self._lock:
+            self._fails.pop(key, None)
+            self._until.pop(key, None)
+
+
+LOGIN_THROTTLE = LoginThrottle()
+
+
 @app.post("/api/login")
-def login(body: LoginBody):
+def login(body: LoginBody, request: Request):
     if not settings.password:
         return {"ok": True}
+    key = request.client.host if request.client else "unknown"
+    wait = LOGIN_THROTTLE.check(key)
+    if wait:
+        raise HTTPException(status_code=429, detail=f"Слишком много попыток. Подождите {wait} с.",
+                            headers={"Retry-After": str(wait)})
     if not hmac.compare_digest(body.password, settings.password):
-        raise HTTPException(status_code=403, detail="Неверный пароль")
+        wait = LOGIN_THROTTLE.fail(key)
+        detail = "Неверный пароль" if not wait else f"Неверный пароль. Следующая попытка через {wait} с."
+        raise HTTPException(status_code=403, detail=detail,
+                            headers={"Retry-After": str(wait)} if wait else None)
+    LOGIN_THROTTLE.reset(key)
     response = Response(content='{"ok":true}', media_type="application/json")
     response.set_cookie(COOKIE, _session_value(), max_age=14 * 24 * 3600,
                         httponly=True, samesite="lax", secure=settings.secure_cookie)

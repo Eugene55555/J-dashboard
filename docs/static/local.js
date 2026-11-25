@@ -7,6 +7,12 @@ window.LocalAPI = (() => {
   // может совпадать с другими его аккаунтами, а ключ живёт только эту вкладку.
   const UNLOCK_KEY = 'jd_key';
   const LEGACY_KEY = 'jd_password';
+  // Счётчик неудачных попыток на воротах. Живёт в localStorage, чтобы
+  // перезагрузка страницы его не обнуляла. Это защита от ручного перебора:
+  // офлайн-атаку на шифротекст ограничивает только стоимость PBKDF2.
+  const GATE_KEY = 'jd_gate_fails';
+  const GATE_FREE_TRIES = 3;   // первые попытки без паузы
+  const GATE_MAX_DELAY = 30;   // максимальная пауза, секунды
 
   function b64ToBytes(value) {
     const binary = atob(value);
@@ -50,6 +56,35 @@ window.LocalAPI = (() => {
     }
   }
 
+  function gateState() {
+    try { return JSON.parse(localStorage.getItem(GATE_KEY) || '{}') || {}; }
+    catch (err) { return {}; }
+  }
+
+  function gateWait(state) {
+    const until = Number(state.until) || 0;
+    return until > Date.now() ? Math.ceil((until - Date.now()) / 1000) : 0;
+  }
+
+  function gateFail() {
+    const state = gateState();
+    const fails = (Number(state.fails) || 0) + 1;
+    const delay = fails <= GATE_FREE_TRIES ? 0
+      : Math.min(GATE_MAX_DELAY, 2 ** (fails - GATE_FREE_TRIES - 1));
+    try {
+      localStorage.setItem(GATE_KEY, JSON.stringify({ fails, until: delay ? Date.now() + delay * 1000 : 0 }));
+    } catch (err) { /* приватный режим — считаем без сохранения */ }
+    return delay;
+  }
+
+  function gateReset() {
+    try { localStorage.removeItem(GATE_KEY); } catch (err) { /* приватный режим */ }
+  }
+
+  function gateMessage(delay) {
+    return delay ? `Неверный логин или пароль. Следующая попытка через ${delay} с.` : 'Неверный логин или пароль';
+  }
+
   async function unlock() {
     const cfg = await (await fetch(window.J_STATIC.dataUrl, { cache: 'no-store' })).json();
     sessionStorage.removeItem(LEGACY_KEY);  // пароль из прежней версии не держим
@@ -77,8 +112,10 @@ window.LocalAPI = (() => {
       form.onsubmit = async (event) => {
         event.preventDefault();
         error.textContent = '';
+        const wait = gateWait(gateState());
+        if (wait) { error.textContent = `Слишком много попыток. Подождите ${wait} с.`; return; }
         const login = loginInput.value.trim();
-        if (login !== cfg.login) { error.textContent = 'Неверный логин или пароль'; return; }
+        if (login !== cfg.login) { error.textContent = gateMessage(gateFail()); return; }
         const button = document.getElementById('gate-btn');
         button.disabled = true;
         try {
@@ -86,11 +123,12 @@ window.LocalAPI = (() => {
           const data = await decryptWith(key, cfg);
           sessionStorage.setItem(UNLOCK_KEY, bytesToB64(await crypto.subtle.exportKey('raw', key)));
           passwordInput.value = '';
+          gateReset();
           gate.classList.add('hidden');
           document.body.classList.remove('locked');
           resolve(data);
         } catch (err) {
-          error.textContent = 'Неверный логин или пароль';
+          error.textContent = gateMessage(gateFail());
           passwordInput.select();
         } finally {
           button.disabled = false;

@@ -38,7 +38,10 @@ const stubEl = () => ({
 });
 
 function harness(cfg, savedKey) {
-  const store = new Map();
+  const store = new Map();     // sessionStorage
+  const local = new Map();     // localStorage
+  const clock = {now: 1_700_000_000_000};
+  class FakeDate extends Date { static now() { return clock.now; } }
   const els = {};
   const doc = {
     addEventListener() {}, body: stubEl(),
@@ -46,22 +49,24 @@ function harness(cfg, savedKey) {
     querySelector: (sel) => (els[sel] ||= stubEl()),
     querySelectorAll: () => [],
   };
-  const sessionStorage = {
-    getItem: (k) => (store.has(k) ? store.get(k) : null),
-    setItem: (k, v) => store.set(k, String(v)),
-    removeItem: (k) => store.delete(k),
-  };
+  const memory = (map) => ({
+    getItem: (k) => (map.has(k) ? map.get(k) : null),
+    setItem: (k, v) => map.set(k, String(v)),
+    removeItem: (k) => map.delete(k),
+  });
+  const sessionStorage = memory(store);
+  const localStorage = memory(local);
   if (savedKey) sessionStorage.setItem('jd_key', savedKey);
   const ctx = vm.createContext({
     window: {J_STATIC: {dataUrl: 'data.enc.json', encrypted: true}},
     fetch: async () => ({json: async () => cfg}),
-    document: doc, sessionStorage, crypto,
+    document: doc, sessionStorage, localStorage, crypto, Date: FakeDate,
     atob: (v) => Buffer.from(v, 'base64').toString('binary'),
     btoa: (v) => Buffer.from(v, 'binary').toString('base64'),
     TextEncoder, TextDecoder, Intl, URLSearchParams, URL, console,
   });
   vm.runInContext(readFileSync(require.resolve('../app/static/local.js'), 'utf8'), ctx);
-  return {store, els, load: () => vm.runInContext('window.LocalAPI.load()', ctx)};
+  return {store, local, clock, els, load: () => vm.runInContext('window.LocalAPI.load()', ctx)};
 }
 
 async function waitFor(probe, tries = 200) {
@@ -139,4 +144,36 @@ test('static gate: wrong password stores nothing, then the right one opens', asy
   h.els['#gate-form'].onsubmit({preventDefault() {}});
   assert.equal((await pending).meta.date_max, '2026-11-02');
   assert.ok(h.store.get('jd_key'));
+});
+
+test('static gate: pauses after repeated failures and clears the counter on success', async () => {
+  const {cfg} = await makeCfg();
+  const h = harness(cfg, null);
+  const pending = h.load();
+  await waitFor(() => h.els['#gate-form'] && h.els['#gate-form'].onsubmit);
+  h.els['#gate-login'].value = LOGIN;
+
+  for (let i = 0; i < 4; i += 1) {
+    h.els['#gate-error'].textContent = '';
+    h.els['#gate-password'].value = 'wrong-password';
+    h.els['#gate-form'].onsubmit({preventDefault() {}});
+    await waitFor(() => h.els['#gate-error'].textContent !== '');
+  }
+  const state = JSON.parse(h.local.get('jd_gate_fails'));
+  assert.equal(state.fails, 4);
+  assert.match(h.els['#gate-error'].textContent, /Следующая попытка через 1 с/);
+
+  // Пятая попытка сразу — отказ по паузе, даже с верным паролем.
+  h.els['#gate-error'].textContent = '';
+  h.els['#gate-password'].value = PASSWORD;
+  h.els['#gate-form'].onsubmit({preventDefault() {}});
+  await waitFor(() => /Подождите/.test(h.els['#gate-error'].textContent));
+  assert.equal(h.store.has('jd_key'), false, 'во время паузы вход не выполняется');
+
+  // Пауза истекла — вход проходит, счётчик очищен.
+  h.clock.now += 5000;
+  h.els['#gate-error'].textContent = '';
+  h.els['#gate-form'].onsubmit({preventDefault() {}});
+  assert.equal((await pending).meta.date_max, '2026-11-02');
+  assert.equal(h.local.has('jd_gate_fails'), false);
 });
